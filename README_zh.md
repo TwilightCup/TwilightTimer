@@ -37,6 +37,10 @@ HSRTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧为�
 
 ### 可选: Level Collections
 
+> **分支说明（TwilightTimer）**：在 `TwilightTimer` 分支（黄昏杯特供版）上，
+> 本仓库硬依赖 **TwilightCore** 及其内置的 Level Collections 模块。下述内容
+> 针对 `main` 分支。
+
 若安装了 [Level Collections](https://github.com/)(`LevelCollections`)插件，HSRTimer 会
 与之集成，将地图包的最后一关视为整局结束。HSRTimer 在没有该插件时也能正常工作(声明为
 可选依赖 / soft dependency)。
@@ -44,6 +48,10 @@ HSRTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧为�
 ## 构建
 
 需要 .NET SDK(`dotnet`)与通过 Steam 安装的游戏。
+
+（`TwilightTimer` 分支请先构建 TwilightCore——csproj 引用其构建产物 DLL，
+默认 `bin/Release/netstandard2.0/TwilightCore.dll`，可用 `-p:TWILIGHTCORE=`
+覆盖；详见 [docs/zh/TWILIGHT_CUP.md](docs/zh/TWILIGHT_CUP.md)。）
 
 ```bash
 dotnet build src/HSRTimer/HSRTimer.csproj

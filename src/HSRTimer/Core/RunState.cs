@@ -164,6 +164,14 @@ namespace HSRTimer
         /// segment-start logic that consumes it runs.
         /// </summary>
         public bool MenuEntryPending;
+
+        /// <summary>
+        /// Round-scoped segment ordinal (Twilight Cup rounds, T3/T4): the
+        /// index this segment carries within its round — the collection index
+        /// (MULTI) or attempt index (SINGLE). Assigned by RoundTracker at
+        /// segment start; -1 outside a round. Cleared on reset.
+        /// </summary>
+        public int RoundSegmentIndex = -1;
         /// <summary>The active validity flags for this run (R5).</summary>
         public readonly ValidityFlags Flags = new ValidityFlags();
 
@@ -215,6 +223,7 @@ namespace HSRTimer
             InCollectionRunSegment = false;
             InEpilogueSegment = false;
             MenuEntryPending = false;
+            RoundSegmentIndex = -1;
             // CampaignRetryLevel deliberately survives a full-run reset: it is
             // "the level the player last entered from the menu", which stays
             // meaningful across runs (the player usually retries the same

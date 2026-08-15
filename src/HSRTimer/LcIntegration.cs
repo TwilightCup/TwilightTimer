@@ -1,137 +1,98 @@
 using System;
-using System.Reflection;
 
 namespace HSRTimer
 {
     /// <summary>
-    /// Optional integration with the "Level Collections" (LevelCollections)
-    /// plugin, accessed purely by reflection so HSRTimer loads and runs fine
-    /// when LC is absent (declared as a BepInEx soft dependency). Exposes the
-    /// current collection name (for the {collection} template var), detects
+    /// Integration with the Level Collections module built into TwilightCore
+    /// (TwilightCore.CollectionManager). On this branch TwilightCore is a hard
+    /// compile-time + BepInEx dependency, so this bridge consumes its public
+    /// API directly — no reflection and no soft-detection fallback. It exposes
+    /// the current collection name (for the {collection} template var), detects
     /// when a collection's final level completes (so the HUD can surface the
-    /// run total), and lets the one-key retry delegate to LC's
-    /// <c>lc restart</c> command while a collection run is active. Every call
-    /// is wrapped to no-op on any reflection failure.
+    /// run total), and lets the one-key retry delegate to the <c>lc restart</c>
+    /// console command while a collection run is active. Instance may still be
+    /// null during a brief init window even though the dependency guarantees
+    /// load order, so every accessor tolerates that.
     /// </summary>
     public sealed class LcIntegration
     {
         public static LcIntegration Instance { get; private set; }
 
-        private readonly bool _enabled;
-        private readonly Type _managerType;
-        private readonly PropertyInfo _instanceProp;
-        private readonly PropertyInfo _isInRunProp;
-        private readonly PropertyInfo _isLastLevelProp;
-        private readonly PropertyInfo _isDelayedCommandPendingProp;
-        private readonly PropertyInfo _currentCollectionProp;
-        private readonly PropertyInfo _collectionNameProp;
+        private bool _subscribed;
 
         private LcIntegration()
         {
-            try
-            {
-                _managerType = Type.GetType("LevelCollections.CollectionManager, LevelCollections");
-                if (_managerType == null)
-                {
-                    _enabled = false;
-                    Plugin.Logger.LogInfo("HSRTimer: LevelCollections not present; integration disabled.");
-                    return;
-                }
-                _instanceProp = _managerType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
-                _isInRunProp = _managerType.GetProperty("IsInCollectionRun", BindingFlags.Public | BindingFlags.Instance);
-                _isLastLevelProp = _managerType.GetProperty("IsLastLevel", BindingFlags.Public | BindingFlags.Instance);
-                _isDelayedCommandPendingProp = _managerType.GetProperty("IsDelayedCommandPending", BindingFlags.Public | BindingFlags.Instance);
-                _currentCollectionProp = _managerType.GetProperty("CurrentCollection", BindingFlags.Public | BindingFlags.Instance);
-                var colType = _currentCollectionProp != null ? _currentCollectionProp.PropertyType : null;
-                _collectionNameProp = colType != null ? colType.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance) : null;
-                _enabled = _instanceProp != null && _isInRunProp != null;
-                if (_enabled)
-                    Plugin.Logger.LogInfo("HSRTimer: LevelCollections integration enabled.");
-            }
-            catch (Exception ex)
-            {
-                Plugin.Logger.LogWarning($"HSRTimer: LC integration init failed: {ex.Message}");
-                _enabled = false;
-            }
+            // The manager singleton may not exist yet at plugin Awake; the
+            // accessors below tolerate that window (T8.5).
+            Plugin.Logger.LogInfo("HSRTimer: TwilightCore LC integration enabled.");
         }
 
         public static void Init() => Instance = new LcIntegration();
 
-        public bool Enabled => _enabled;
+        /// <summary>TwilightCore is loaded (hard dependency); the manager
+        /// singleton may still be initializing.</summary>
+        public bool Enabled => Manager != null;
+
+        /// <summary>Whether the LC lifecycle events are currently subscribed
+        /// (the retry coroutine in Plugin polls this).</summary>
+        public bool SubscribedForEvents => _subscribed;
+
+        private static TwilightCore.CollectionManager Manager
+            => TwilightCore.CollectionManager.Instance;
 
         /// <summary>
-        /// True when the player is in the middle of an LC collection run
+        /// True when the player is in the middle of a collection run
         /// (a config collection or a transient <c>lc random</c> run). When true,
-        /// the one-key retry should delegate to LC's <c>lc restart</c> command so
-        /// the whole collection restarts from level 1 instead of just reloading
-        /// the current level.
+        /// the one-key retry should delegate to <c>lc restart</c> so the whole
+        /// collection restarts from level 1 instead of just reloading the
+        /// current level.
         /// </summary>
         public bool IsInCollectionRun
         {
             get
             {
-                if (!_enabled) return false;
-                try
-                {
-                    var mgr = _instanceProp != null ? _instanceProp.GetValue(null, null) : null;
-                    return mgr != null
-                        && _isInRunProp != null
-                        && Convert.ToBoolean(_isInRunProp.GetValue(mgr, null));
-                }
-                catch { return false; }
+                var mgr = Manager;
+                return mgr != null && mgr.IsInCollectionRun;
             }
         }
 
         /// <summary>
-        /// True while LC has a delayed console command
-        /// (<c>lc restart/skip/random &lt;seconds&gt;</c>) counting down. LC refuses
-        /// a new <c>lc restart</c> in that window, so HSRTimer should also refuse
-        /// (rather than zero the timer and then stall with no reload).
+        /// True while a delayed console command
+        /// (<c>lc restart/skip/random &lt;seconds&gt;</c>) is counting down. The
+        /// command handler refuses a new <c>lc restart</c> in that window, so
+        /// HSRTimer should also refuse (rather than zero the timer and then
+        /// stall with no reload).
         /// </summary>
         public bool IsDelayedCommandPending
         {
             get
             {
-                if (!_enabled || _isDelayedCommandPendingProp == null) return false;
-                try
-                {
-                    var mgr = _instanceProp != null ? _instanceProp.GetValue(null, null) : null;
-                    return mgr != null && Convert.ToBoolean(_isDelayedCommandPendingProp.GetValue(mgr, null));
-                }
-                catch { return false; }
+                var mgr = Manager;
+                return mgr != null && mgr.IsDelayedCommandPending;
             }
         }
 
         /// <summary>
         /// Restart the current collection from its first level by dispatching
-        /// LC's own <c>lc restart</c> command through the game's dev-console
-        /// registry (<c>Shell.RawInvoke</c>). This is the public entry LC
-        /// registers on load, so it works for both config collections and
-        /// transient (<c>lc random</c>) runs, and reuses LC's scene-reload
-        /// forcing, validation, and level launching. Returns true if dispatched.
-        /// No-op (returns false) when LC is absent, not in a run, or a delayed
+        /// the <c>lc restart</c> command through the game's dev-console
+        /// registry (<c>Shell.RawInvoke</c>) — the same entry TwilightCore's
+        /// built-in LC registers on load, so it works for both config
+        /// collections and transient (<c>lc random</c>) runs, reusing its
+        /// scene-reload forcing, validation, and level launching. Returns true
+        /// if dispatched. No-op (returns false) when not in a run or a delayed
         /// command is pending.
         /// </summary>
         public bool RestartCollection()
         {
-            if (!_enabled || !IsInCollectionRun || IsDelayedCommandPending)
+            if (!IsInCollectionRun || IsDelayedCommandPending)
                 return false;
 
             try
             {
                 // Shell.RawInvoke runs the command through the same registry
                 // Shell.Update uses, so it behaves exactly like typing
-                // "lc restart" into the console. It is a public static on the
-                // game's Shell type; resolve it by reflection to stay decoupled
-                // from the game assembly at compile time.
-                var shellType = Type.GetType("Shell, Assembly-CSharp");
-                var raw = shellType?.GetMethod("RawInvoke", BindingFlags.Public | BindingFlags.Static);
-                if (shellType == null || raw == null)
-                {
-                    Plugin.Logger.LogWarning("HSRTimer: Shell.RawInvoke not found; cannot delegate retry to LC.");
-                    return false;
-                }
-                raw.Invoke(null, new object[] { "lc restart" });
+                // "lc restart" into the console.
+                Shell.RawInvoke("lc restart");
                 return true;
             }
             catch (System.Exception ex)
@@ -141,20 +102,13 @@ namespace HSRTimer
             }
         }
 
-        /// <summary>True when the player is in an LC collection run and on its last level.</summary>
+        /// <summary>True when the player is in a collection run and on its last level.</summary>
         public bool IsLastLevelOfCollection
         {
             get
             {
-                if (!_enabled) return false;
-                try
-                {
-                    var mgr = _instanceProp != null ? _instanceProp.GetValue(null, null) : null;
-                    if (mgr == null) return false;
-                    if (!Convert.ToBoolean(_isInRunProp.GetValue(mgr, null))) return false;
-                    return _isLastLevelProp != null && Convert.ToBoolean(_isLastLevelProp.GetValue(mgr, null));
-                }
-                catch { return false; }
+                var mgr = Manager;
+                return mgr != null && mgr.IsInCollectionRun && mgr.IsLastLevel;
             }
         }
 
@@ -163,18 +117,60 @@ namespace HSRTimer
         {
             get
             {
-                if (!_enabled) return null;
-                try
-                {
-                    var mgr = _instanceProp != null ? _instanceProp.GetValue(null, null) : null;
-                    if (mgr == null) return null;
-                    if (_isInRunProp != null && !Convert.ToBoolean(_isInRunProp.GetValue(mgr, null))) return null;
-                    if (_currentCollectionProp == null || _collectionNameProp == null) return null;
-                    var col = _currentCollectionProp.GetValue(mgr, null);
-                    return col != null ? _collectionNameProp.GetValue(col, null) as string : null;
-                }
-                catch { return null; }
+                var mgr = Manager;
+                if (mgr == null || !mgr.IsInCollectionRun) return null;
+                // CollectionDefinition.Name is a public field (not a property).
+                return mgr.CurrentCollection?.Name;
             }
+        }
+
+        /// <summary>
+        /// Subscribe to the built-in LC's lifecycle events (T8.3). Idempotent;
+        /// paired with <see cref="UnsubscribeEvents"/> on plugin destroy.
+        /// LevelStarted/LevelCompleted/RunCompleted are used only as
+        /// cross-check logs — the engine's own per-tick latching remains the
+        /// authoritative source for R1.6 (it latches before Game.Fall tears
+        /// the run down). RunAborted resolves a pending unpassed exit
+        /// immediately (T4.4) so it is not double-fired by a later StopRound.
+        /// </summary>
+        public void SubscribeEvents()
+        {
+            var mgr = Manager;
+            if (_subscribed || mgr == null) return;
+            _subscribed = true;
+            mgr.LevelStarted += OnLevelStarted;
+            mgr.LevelCompleted += OnLevelCompleted;
+            mgr.RunCompleted += OnRunCompleted;
+            mgr.RunAborted += OnRunAborted;
+        }
+
+        public void UnsubscribeEvents()
+        {
+            if (!_subscribed) return;
+            _subscribed = false;
+            var mgr = Manager;
+            if (mgr == null) return;
+            mgr.LevelStarted -= OnLevelStarted;
+            mgr.LevelCompleted -= OnLevelCompleted;
+            mgr.RunCompleted -= OnRunCompleted;
+            mgr.RunAborted -= OnRunAborted;
+        }
+
+        private void OnLevelStarted(string levelId, int levelIndex)
+            => Plugin.Logger.LogInfo($"HSRTimer: LC level started (#{levelIndex}): {levelId}");
+
+        private void OnLevelCompleted(int levelIndex, bool skipped)
+            => Plugin.Logger.LogInfo($"HSRTimer: LC level completed (#{levelIndex}, skipped={skipped})");
+
+        private void OnRunCompleted()
+            => Plugin.Logger.LogInfo("HSRTimer: LC collection run completed.");
+
+        private void OnRunAborted()
+        {
+            Plugin.Logger.LogInfo("HSRTimer: LC collection run aborted.");
+            // T4.4: resolve a pending unpassed exit immediately rather than
+            // waiting for the StopRound call that follows; idempotent.
+            RoundTracker.OnRunAborted();
         }
     }
 }

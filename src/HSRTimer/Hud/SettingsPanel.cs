@@ -107,7 +107,18 @@ namespace HSRTimer
         {
             if (!_visible) return;
             EnsureStyles();
-            _rect = GUI.Window(GetInstanceID(), _rect, Draw, "HSRTimer");
+            // T2.2: badge the window title while a match is running (with the
+            // round id when a round is in flight).
+            string title = "HSRTimer";
+            if (MatchMode.Active)
+            {
+                var cfg0 = ConfigService.Instance;
+                string badge = cfg0 != null ? cfg0.Localization.Get("PANEL_MATCH_BADGE") : "Match";
+                title += " — " + badge;
+                if (RoundTracker.RoundActive && RoundTracker.RoundId != null)
+                    title += " #" + RoundTracker.RoundId;
+            }
+            _rect = GUI.Window(GetInstanceID(), _rect, Draw, title);
         }
 
         private void Draw(int id)
@@ -169,9 +180,15 @@ namespace HSRTimer
         private void DrawGeneral(ConfigService cfg, SettingsModel s, LocalizationService loc)
         {
             Section(loc.Get("PANEL_TIMING"));
+            // T2.3: during a match the settings that conflict with the match
+            // rules (T5/T7) are view-only — CountInPause is forced on (T7.3),
+            // AutoReset is superseded by the round tracker (T7.2).
+            bool locked = MatchMode.Active;
+            GUI.enabled = !locked;
             s.CountInPause = Toggle(loc.Get("SETTINGS_COUNT_IN_PAUSE"), s.CountInPause);
-            s.CountInMenu = Toggle(loc.Get("SETTINGS_COUNT_IN_MENU"), s.CountInMenu);
             s.AutoReset = Toggle(loc.Get("SETTINGS_AUTO_RESET"), s.AutoReset);
+            GUI.enabled = true;
+            s.CountInMenu = Toggle(loc.Get("SETTINGS_COUNT_IN_MENU"), s.CountInMenu);
             s.RestartClearsForgivable = Toggle(loc.Get("SETTINGS_RESTART_CLEARS_FORGIVABLE"), s.RestartClearsForgivable);
             // Free-form input (clamped ≥0 on apply); the slider's 5s cap was
             // artificial — RetryAction only needs Mathf.Max(0, dwell).
@@ -187,8 +204,13 @@ namespace HSRTimer
             }
 
             Section(loc.Get("PANEL_KEYBINDS"));
+            // T7.4/T7.1: the reset and retry keys are disabled in match mode
+            // (rebinding them would be pointless — they log-only during a
+            // round). The menu key stays rebindable.
+            GUI.enabled = !locked;
             KeybindRow(loc, "SETTINGS_RESET_KEY", () => s.ResetKey, k => s.ResetKey = k);
             KeybindRow(loc, "SETTINGS_RETRY_KEY", () => s.RetryKey, k => s.RetryKey = k);
+            GUI.enabled = true;
             KeybindRow(loc, "SETTINGS_MENU_KEY", () => s.MenuKey, k => s.MenuKey = k);
         }
 
@@ -314,7 +336,9 @@ namespace HSRTimer
 
         // Multi-select of rule tags. There are no category presets — every
         // registered tag rule (built-in + any custom) is listed as a checkbox;
-        // toggling adds/removes the tag from the enabled set, live.
+        // toggling adds/removes the tag from the enabled set, live. During a
+        // match the pushed round tags are the sole authority (T5.3): the list
+        // still shows what is in effect (T5.6) but cannot be edited (T2.3).
         private void DrawTagMultiSelect(ConfigService cfg, LocalizationService loc)
         {
             var tags = cfg.EnabledTags;
@@ -324,18 +348,23 @@ namespace HSRTimer
                 return;
             }
 
+            bool locked = MatchMode.Active;
+            GUI.enabled = !locked;
             foreach (var rule in TagRuleRegistry.Instance.All)
             {
                 bool on = tags.HasTag(rule.Id);
                 string display = string.IsNullOrEmpty(rule.DisplayNameKey)
                     ? rule.Id : loc.Get(rule.DisplayNameKey);
                 bool next = GUILayout.Toggle(on, display + "  [" + rule.Id + "]", _toggle);
-                if (next != on)
+                if (!locked && next != on)
                 {
                     if (next) tags.Enable(rule.Id);
                     else tags.Disable(rule.Id);
                 }
             }
+            GUI.enabled = true;
+            if (locked)
+                GUILayout.Label(loc.Get("PANEL_MATCH_TAGS_LOCKED"), _small);
         }
 
         // Single-select language picker (SelectionGrid with the _button style so

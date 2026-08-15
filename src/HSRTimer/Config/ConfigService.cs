@@ -39,9 +39,22 @@ namespace HSRTimer
         public void SaveSettings()
         {
             Settings.CurrentLang = Localization.CurrentCode;
-            Settings.Save();
-            EnabledTags.Save();
-            Layout.Save();
+            // While a match is active, the in-memory tag set is the pushed
+            // round set, not the user's — swap the snapshot back in so the
+            // save always writes the user's own tags.ini (A1). The forced
+            // pause rule (T7.3) never touches the settings field, so only
+            // the tag list needs guarding.
+            MatchMode.PushUserValuesForSave();
+            try
+            {
+                Settings.Save();
+                EnabledTags.Save();
+                Layout.Save();
+            }
+            finally
+            {
+                MatchMode.RestoreMatchOverrides();
+            }
         }
 
         /// <summary>Re-scan language files and re-apply the current language.</summary>

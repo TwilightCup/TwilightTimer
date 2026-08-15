@@ -57,7 +57,14 @@ Config/
   SettingsModel.cs, EnabledTagsModel.cs, LayoutModel.cs
 Localization/
   LocalizationService.cs, LanguageFile.cs
-LcIntegration.cs          可选的 LevelCollections 软集成
+LcIntegration.cs          TwilightCore 内置 LC 集成（直连 API，硬依赖）
+HSRTimerApi.cs            公共静态调试/直连面（黄昏杯 T1.6）
+Match/                    黄昏杯比赛支持（见 TWILIGHT_CUP.md）
+  MatchMode.cs            比赛模式状态 + 用户标签快照（T2）
+  RoundTracker.cs         回合生命周期、分段记录、查询（T3/T4.5/T5）
+  TimerEvents.cs          对外事件，逐订阅者 try/catch（T4）
+  MainThreadQueue.cs      外部调用的主线程编组（T1.4）
+  TwilightTimerProvider.cs ITimerProvider 适配器，向 TwilightCore 自注册（T1）
 ```
 
 ## 计时真值表(附录 B)
@@ -164,3 +171,13 @@ dotnet build src/HSRTimer/HSRTimer.csproj
 ```
 
 `Directory.Build.props` 指向默认 Steam 安装目录下的托管 DLL 与 BepInEx core。其他平台用 `GAME_MANAGED` / `BEPINEX_CORE` 覆盖。
+
+
+## 黄昏杯比赛集成（TwilightTimer 分支）
+
+`TwilightTimer` 分支硬依赖 TwilightCore（编译期引用其构建产物 DLL +
+BepInDependency）并作为其计时引擎。比赛能力位于 `Match/` 与
+`HSRTimerApi`，仅在比赛对局内生效；本地游玩不受影响。完整行为、约束与
+验收场景映射见 [TWILIGHT_CUP.md](TWILIGHT_CUP.md)。与 TwilightCore 的
+集成契约（ITimerProvider）为依赖倒置：TwilightCore 拥有接口，本插件实现
+并自注册。

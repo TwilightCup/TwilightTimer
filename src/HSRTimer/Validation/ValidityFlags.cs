@@ -29,17 +29,40 @@ namespace HSRTimer
             }
         }
 
+        /// <summary>
+        /// Fired when a NEW reason is added ( HashSet.Add returns true).
+        /// Wired by the engine to RoundTracker.OnInvalidRaised so external
+        /// consumers learn of invalid marks live (T4.6). Never throws.
+        /// </summary>
+        public System.Action<InvalidReason, bool> OnRaised;
+
         /// <summary>Record a reason. Idempotent; ignores severity duplicates.</summary>
         public void Raise(InvalidReason reason)
         {
-            if (InvalidReasons.SeverityOf(reason) == Severity.Unforgivable)
-                _unforgivable.Add(reason);
-            else
-                _forgivable.Add(reason);
+            bool unforgivable = InvalidReasons.SeverityOf(reason) == Severity.Unforgivable;
+            bool added = unforgivable
+                ? _unforgivable.Add(reason)
+                : _forgivable.Add(reason);
+            if (added)
+            {
+                var h = OnRaised;
+                if (h != null)
+                {
+                    try { h(reason, unforgivable); }
+                    catch { /* a reporting hook must never break the engine */ }
+                }
+            }
         }
 
         /// <summary>R5.4.2: clear only forgivable flags (manual retry).</summary>
         public void ClearForgivable() => _forgivable.Clear();
+
+        /// <summary>Clear a single reason (match checkpoint-skip penalty).</summary>
+        public void Clear(InvalidReason reason)
+        {
+            _unforgivable.Remove(reason);
+            _forgivable.Remove(reason);
+        }
 
         /// <summary>Clear everything (full-run reset / game restart).</summary>
         public void ClearAll()

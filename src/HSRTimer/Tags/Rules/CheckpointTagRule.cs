@@ -34,6 +34,10 @@ namespace HSRTimer
                 && CheckpointRules.IsSkipViolation(_source, _level, ctx.PrevCheckpoint, ctx.CurrentCheckpoint))
             {
                 ctx.Flags.Raise(InvalidReason.CheckpointSkip);
+                // Twilight Cup match rule: roll the player's progress back to
+                // the checkpoint before the skipped span (no-op outside a match
+                // round — practice keeps the plain v1 flag).
+                MatchCheckpointPenalty.OnSkipViolation(ctx.PrevCheckpoint);
             }
         }
 

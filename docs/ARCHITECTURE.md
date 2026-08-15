@@ -65,7 +65,14 @@ Config/
   SettingsModel.cs, EnabledTagsModel.cs, LayoutModel.cs
 Localization/
   LocalizationService.cs, LanguageFile.cs
-LcIntegration.cs          optional LevelCollections soft integration
+LcIntegration.cs          TwilightCore built-in LC integration (direct API, hard dependency)
+HSRTimerApi.cs            public static debug/direct-consumption surface (Twilight Cup T1.6)
+Match/                    Twilight Cup match support (see TWILIGHT_CUP.md)
+  MatchMode.cs            match-mode state + user tag snapshot (T2)
+  RoundTracker.cs         round lifecycle, segment records, queries (T3/T4.5/T5)
+  TimerEvents.cs          outbound events, per-subscriber try/catch (T4)
+  MainThreadQueue.cs      main-thread marshaling for external callers (T1.4)
+  TwilightTimerProvider.cs ITimerProvider adapter, self-registers with TwilightCore (T1)
 ```
 
 ## The timing truth table (Appendix B)
@@ -325,3 +332,15 @@ dotnet build src/HSRTimer/HSRTimer.csproj
 
 `Directory.Build.props` points at the default Steam install's managed DLLs and
 BepInEx core. Override `GAME_MANAGED` / `BEPINEX_CORE` for other platforms.
+
+
+## Twilight Cup match integration (TwilightTimer branch)
+
+The `TwilightTimer` branch hard-depends on TwilightCore (compile-time
+reference to its built DLL + BepInDependency) and serves as its timing
+engine. Match capabilities live in `Match/` and `HSRTimerApi` and activate
+only inside a match session; local play is unaffected. See
+[TWILIGHT_CUP.md](TWILIGHT_CUP.md) for the full behavior, constraints, and
+the acceptance-scenario mapping. The integration contract with TwilightCore
+(ITimerProvider) is dependency-inverted: TwilightCore owns the interface,
+this plugin implements and self-registers it.

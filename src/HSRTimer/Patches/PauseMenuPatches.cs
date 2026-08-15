@@ -40,4 +40,34 @@ namespace HSRTimer
             }
         }
     }
+
+    /// <summary>
+    /// Harmony postfix on <c>PauseMenu.LoadClick()</c> — the pause menu's
+    /// "load save point" button (<c>Game.RestartCheckpoint()</c> respawn at
+    /// the current checkpoint). In a match round with a pending checkpoint-skip
+    /// penalty (Twilight Cup rule), loading the save point confirms the player
+    /// returned to the rolled-back checkpoint: clear the CheckpointSkip mark
+    /// and the pending latch so the run continues valid.
+    /// </summary>
+    [HarmonyPatch(typeof(PauseMenu), nameof(PauseMenu.LoadClick))]
+    internal static class PauseMenuLoadPatch
+    {
+        private static void Postfix()
+        {
+            try
+            {
+                if (!MatchCheckpointPenalty.Pending)
+                    return;
+                var state = TimerCore.State;
+                if (state == null)
+                    return;
+                state.Flags.Clear(InvalidReason.CheckpointSkip);
+                MatchCheckpointPenalty.OnSaveLoaded();
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Logger.LogWarning($"HSRTimer: PauseMenu.LoadClick postfix failed: {ex.Message}");
+            }
+        }
+    }
 }

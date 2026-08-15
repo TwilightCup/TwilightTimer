@@ -41,7 +41,12 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the full specification.
    (the plugin creates this dir and ships defaults on first run if absent).
 5. Launch the game; confirm `HSRTimer is loaded!` in the BepInEx console.
 
-### Optional: Level Collections
+> **Branch note (TwilightTimer)**: on the `TwilightTimer` branch — the
+> Twilight Cup special edition — this repository hard-depends on
+> **TwilightCore** and its built-in Level Collections module. The section
+> below describes the `main` branch.
+
+### Optional: Level Collections (main branch)
 
 If the [Level Collections](https://github.com/) (`LevelCollections`) plugin is
 installed, HSRTimer integrates with it to treat a collection's final level as
@@ -55,6 +60,11 @@ Requires the .NET SDK (`dotnet`) and the game installed via Steam.
 ```bash
 dotnet build src/HSRTimer/HSRTimer.csproj
 ```
+
+On the `TwilightTimer` branch, build TwilightCore first — the csproj
+references its built DLL (`bin/Release/netstandard2.0/TwilightCore.dll` by
+default, overridable via `-p:TWILIGHTCORE=`); see
+[docs/TWILIGHT_CUP.md](docs/TWILIGHT_CUP.md).
 
 The build resolves game/BepInEx DLL references from the default Steam install
 path (see `Directory.Build.props`). On a non-default Steam library or another

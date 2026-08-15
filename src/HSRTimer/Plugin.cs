@@ -7,12 +7,13 @@ namespace HSRTimer
     /// <summary>
     /// BepInEx plugin entry point. Wires every subsystem: loads config, registers
     /// the built-in tag rules, applies the voiceline Harmony patches, initializes
-    /// the optional LevelCollections integration, and spawns the engine + HUD
-    /// singletons. Declares LevelCollections as a soft dependency so the plugin
-    /// loads and runs fine without it.
+    /// the TwilightCore built-in LevelCollections integration, and spawns the
+    /// engine + HUD singletons. TwilightCore is a hard dependency (compile-time
+    /// reference + BepInDependency) — this TwilightTimer branch does not work
+    /// without it.
     /// </summary>
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
-    [BepInDependency("LevelCollections", BepInEx.BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency("TwilightCore", BepInEx.BepInDependency.DependencyFlags.HardDependency)]
     public class Plugin : BaseUnityPlugin
     {
         internal static new ManualLogSource Logger;
@@ -46,8 +47,38 @@ namespace HSRTimer
             // 3. Harmony patches (voiceline hooks only).
             PatchModule.Apply();
 
-            // 4. Optional LevelCollections integration (reflection; no-op if absent).
+            // 4. TwilightCore built-in LevelCollections integration (direct API).
             LcIntegration.Init();
+            // Subscribe lazily too: the manager singleton may not exist yet at
+            // plugin Awake (the BepInDependency only orders plugin loading).
+            LcIntegration.Instance.SubscribeEvents();
+            TwilightCore.CollectionManager.Instance?.StartCoroutine(SubscribeWhenReady());
+
+            // 5. Register this plugin as TwilightCore's timer provider (T1.2).
+            //    TwilightCore resolves the registry lazily per round event, so
+            //    registering at the end of Awake (engine/HUD spawn below) is
+            //    in time for any round; mutating calls are marshaled to the
+            //    main thread by the adapter itself.
+            TwilightTimerProvider.Register();
+        }
+
+        private void OnDestroy()
+        {
+            LcIntegration.Instance?.UnsubscribeEvents();
+            TwilightTimerProvider.Unregister();
+        }
+
+        /// <summary>
+        /// The LC manager singleton may be created slightly after this plugin's
+        /// Awake despite the dependency ordering; retry the event subscription
+        /// over a few frames until it appears (idempotent once subscribed).
+        /// </summary>
+        private System.Collections.IEnumerator SubscribeWhenReady()
+        {
+            int tries = 0;
+            while (!LcIntegration.Instance.SubscribedForEvents && tries++ < 300)
+                yield return null;
+            LcIntegration.Instance.SubscribeEvents();
 
             // 5. Engine + HUD + settings-panel singletons, persistent across scene loads.
             var engineGo = new GameObject("HSRTimer.Core");

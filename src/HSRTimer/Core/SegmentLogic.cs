@@ -14,7 +14,10 @@ namespace HSRTimer
 
         public static TimingOptions FromSettings(SettingsModel s) => new TimingOptions
         {
-            CountInPause = s.CountInPause,
+            // T7.3: in match mode, pause time always counts — enforced at read
+            // time so the user's settings.ini is never overwritten with a
+            // match-forced value.
+            CountInPause = s.CountInPause || MatchMode.Active,
             CountInMenu = s.CountInMenu,
             AutoReset = s.AutoReset,
         };

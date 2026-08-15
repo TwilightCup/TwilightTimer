@@ -29,12 +29,25 @@ namespace HSRTimer
         {
             Instance = this;
             State = new RunState();
+            // T4.6: surface newly-raised invalid marks to round consumers.
+            State.Flags.OnRaised = RoundTracker.OnInvalidRaised;
             _cfg = ConfigService.Instance;
             _drift = new DriftDetector();
             UpdateOptions();
         }
 
         private void UpdateOptions() => _opt = TimingOptions.FromSettings(_cfg.Settings);
+
+        /// <summary>Re-read timing options from config (match-mode enter/exit).</summary>
+        internal void RefreshOptions() => UpdateOptions();
+
+        /// <summary>
+        /// Full reset for a new round (T3.1): identical scope to the manual
+        /// reset key (R1.7.1) — clears live timing, last-segment / total /
+        /// last-run snapshots, and ALL invalid marks (a new round is a fresh
+        /// run).
+        /// </summary>
+        internal void FullResetForRound() => DoFullReset(keepLastValues: false);
 
         // ── Physics step: accumulation + transitions + per-tick rules ───────
         private void FixedUpdate()
@@ -98,6 +111,9 @@ namespace HSRTimer
         {
             if (State == null || _cfg == null) return;
 
+            // Drain externally-enqueued actions (T1.4 marshaling).
+            MainThreadQueue.Drain();
+
             GameState gState = Game.instance != null ? Game.instance.state : GameState.Inactive;
 
             // Generic always-on validity checks (R5.1). timeScale only flagged while playing.
@@ -134,13 +150,17 @@ namespace HSRTimer
                 EndSegment(game, completed: State.LevelPassed);
 
             // R1.7 auto-reset (honored only when the option is on). Suppressed
-            // during a retry (R6) so reloading the level does not clear the run.
+            // during a retry (R6) so reloading the level does not clear the run,
+            // and during a match round (T7.2) so quitting mid-round cannot zero
+            // the round data — the unpassed exit is reported instead (T4.4).
             // keepLastValues: an auto-reset clears the live run but preserves the
             // "last segment / last run" HUD snapshots (LastSegment /
             // TotalAtLastSegment / LastRun) — those are reference values that
             // update only when a new value is recorded or a manual reset clears
             // them, not on every auto-reset.
-            if (_opt.AutoReset && SegmentLogic.IsAutoReset(prevG, gState, prevA, aState, isLocal, State.Retrying))
+            if (_opt.AutoReset
+                && !RoundTracker.RoundActive
+                && SegmentLogic.IsAutoReset(prevG, gState, prevA, aState, isLocal, State.Retrying))
             {
                 DoFullReset(keepLastValues: true);
                 return;
@@ -174,6 +194,9 @@ namespace HSRTimer
 
             int cp = game.currentCheckpointNumber;
             State.BeginSegment(State.GameTime, game.currentLevelNumber, game.currentLevelType, cp);
+            // T3/T4: assign the segment its round ordinal (and resolve a
+            // pending unpassed exit as a skip when another segment follows).
+            RoundTracker.OnSegmentStart();
             // The Credits level (BuiltIn index == levelCount) is the epilogue of
             // the campaign run that just finished — not a new run. Mark it so the
             // HUD keeps showing the recorded LastRun during it and recording
@@ -220,8 +243,16 @@ namespace HSRTimer
         private void EndSegment(Game game, bool completed)
         {
             double end = State.GameTime;
+            double segStart = State.SegmentStart; // captured before EndSegment mutates it
+            int roundIndex = State.RoundSegmentIndex;
             bool retrying = State.Retrying;
             State.EndSegment(end, completed);
+
+            // T4.1/T4.4: report the segment outcome to the round tracker.
+            // Only genuine outcomes count — a retry reload abandons its
+            // segment without it being a skip or an exit.
+            if (!retrying)
+                RoundTracker.OnSegmentEnd(roundIndex, Ms(end - segStart), Ms(end), completed);
 
             // Fire tag OnLevelExit — but only for a genuine level completion. A
             // retry or a mid-level quit abandons the level (its reload/leave
@@ -249,7 +280,13 @@ namespace HSRTimer
                     && !State.InCollectionRunSegment;
                 bool collectionDone = State.OnCollectionLastLevel;
                 if (campaignDone || standaloneEditorPick || collectionDone)
+                {
                     State.LastRun = end;
+                    // T4.3: the whole collection finished — report the
+                    // game-time total to the round tracker.
+                    if (collectionDone)
+                        RoundTracker.OnRunCompleted(Ms(end));
+                }
             }
 
             if (!retrying)
@@ -327,6 +364,19 @@ namespace HSRTimer
             if (SettingsPanel.Instance != null && SettingsPanel.Instance.IsVisible)
                 return;
 
+            // T7.4/T7.1: during a match round the reset and retry keys are
+            // disabled — round data must be reported complete, and restarting
+            // the collection (or reloading the level) would violate the match
+            // rules. Log-only, and only while a round is actually in flight.
+            if (MatchMode.Active && RoundTracker.RoundActive)
+            {
+                if (Input.GetKeyDown(s.ResetKey))
+                    Notify("NOTIFY_RESET_DISABLED_MATCH");
+                if (Input.GetKeyDown(s.RetryKey))
+                    Notify("NOTIFY_RETRY_DISABLED_MATCH");
+                return;
+            }
+
             if (Input.GetKeyDown(s.ResetKey))
             {
                 DoFullReset(keepLastValues: false);
@@ -356,6 +406,9 @@ namespace HSRTimer
             string msg = arg != null ? _cfg.Localization.Get(key, arg) : _cfg.Localization.Get(key);
             Plugin.Logger.LogInfo($"HSRTimer: {msg}");
         }
+
+        /// <summary>Seconds → whole milliseconds (game-time reporting).</summary>
+        private static long Ms(double seconds) => (long)System.Math.Round(seconds * 1000d);
 
         private static void Safe(ITagRule rule, System.Action<ITagRule> action)
         {

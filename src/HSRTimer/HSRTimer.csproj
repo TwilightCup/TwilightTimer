@@ -63,6 +63,19 @@
     </Reference>
   </ItemGroup>
 
+  <!-- TwilightCore (hard dependency on the TwilightTimer branch). Reference
+       its BUILT DLL: build TwilightCore first (dotnet build -c Release), or
+       override the path via -p:TWILIGHTCORE=... -->
+  <PropertyGroup>
+    <TWILIGHTCORE Condition=" '$(TWILIGHTCORE)' == '' ">$(MSBuildThisFileDirectory)..\..\..\TwilightCore\bin\Release\netstandard2.0\TwilightCore.dll</TWILIGHTCORE>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="TwilightCore">
+      <HintPath>$(TWILIGHTCORE)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
   <!-- Unity engine modules (only what HSRTimer uses) -->
   <ItemGroup>
     <Reference Include="UnityEngine">
