@@ -2,11 +2,11 @@
 
 > **English (source of truth)**: [../ARCHITECTURE.md](../ARCHITECTURE.md)
 
-本文档说明 HSRTimer 的结构与设计决策。需求规格见 [../../REQUIREMENTS.md](../../REQUIREMENTS.md)。
+本文档说明 TwilightTimer 的结构与设计决策。需求规格见 [../../REQUIREMENTS.md](../../REQUIREMENTS.md)。
 
 ## 核心原则:轮询,而非 patch
 
-HSRTimer 所需的几乎所有信号都是游戏类的**公共字段或属性**:
+TwilightTimer 所需的几乎所有信号都是游戏类的**公共字段或属性**:
 
 | 信号 | 来源 |
 |------|------|
@@ -58,7 +58,7 @@ Config/
 Localization/
   LocalizationService.cs, LanguageFile.cs
 LcIntegration.cs          TwilightCore 内置 LC 集成（直连 API，硬依赖）
-HSRTimerApi.cs            公共静态调试/直连面（黄昏杯 T1.6）
+TwilightTimerApi.cs            公共静态调试/直连面（黄昏杯 T1.6）
 Match/                    黄昏杯比赛支持（见 TWILIGHT_CUP.md）
   MatchMode.cs            比赛模式状态 + 用户标签快照（T2）
   RoundTracker.cs         回合生命周期、分段记录、查询（T3/T4.5/T5）
@@ -86,7 +86,7 @@ Match/                    黄昏杯比赛支持（见 TWILIGHT_CUP.md）
 
 ## 为什么重试先卸载再重新启动关卡
 
-R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。HSRTimer 以引擎 MonoBehaviour 上的协程驱动:
+R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。TwilightTimer 以引擎 MonoBehaviour 上的协程驱动:
 
 1. `Game.instance.UnloadLevel()` 拆毁当前关卡 —— `AfterUnload` 把 `currentLevelNumber` 置为 `-1`、`state` 置为 `Inactive`,清空 `currentLevel` 与 `workshopLevel`。
 2. `SceneManager.LoadScene("Empty")` 加载空的过渡场景。
@@ -107,11 +107,11 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 
 当 Level Collections(LC)插件已加载**且**玩家正处于某次地图包运行中(`CollectionManager.IsInCollectionRun`)时,一键重试**不再**原地重载当前关卡 —— 而是通过游戏开发者控制台注册表派发 LC 自身的 `lc restart` 命令(`Shell.RawInvoke("lc restart")`),把整局地图包从第 1 关重启。即 `R6.3`。
 
-重启地图包意味着整局从第 1 关重新计时,因此它必须优先于单关重载。委托给 `lc restart`(而非反射 LC 内部)使 HSRTimer 复用 LC 的场景重载强制(`ResetCurrentLevelIfSame`)、关卡校验与启动逻辑 —— 且对配置地图包与临时地图包(`lc random`)均适用。`Shell.RawInvoke` 正是控制台所走的代码路径,因此派发的命令与手动键入 `lc restart` 行为完全一致。
+重启地图包意味着整局从第 1 关重新计时,因此它必须优先于单关重载。委托给 `lc restart`(而非反射 LC 内部)使 TwilightTimer 复用 LC 的场景重载强制(`ResetCurrentLevelIfSame`)、关卡校验与启动逻辑 —— 且对配置地图包与临时地图包(`lc random`)均适用。`Shell.RawInvoke` 正是控制台所走的代码路径,因此派发的命令与手动键入 `lc restart` 行为完全一致。
 
 计时器对此的处理与单关重试完全一致:先将 `GameTime`/`SegmentStart` 清零并置位 `RunState.Retrying`,这样被放弃关卡的分段终点不会被记为 `LastRun`,重载进入第 1 关也不会被误判为整局退出 —— 同时保留本局记录与(非可原谅)无效标记(R6.2.2 对整局重置 R1.7 的独立性在此同样适用)。实现位于 `RetryAction.TryExecute`(LC 分支)与 `LcIntegration.RestartCollection`。
 
-两个被拦截的情况都以 `NOTIFY_RETRY_BLOCKED_STATE` 提示,且不改动任何计时状态:当 LC 的某条延迟命令(`lc restart/skip/random <秒>`)正在倒计时时(`IsDelayedCommandPending`),LC 自身会拒绝新的 `lc restart`,HSRTimer 因此同样拒绝;若 `RestartCollection` 本身返回 false(调用时 LC 缺失、运行已结束),已被投机清零的计时器会被还原,HSRTimer 回退到单关重载。
+两个被拦截的情况都以 `NOTIFY_RETRY_BLOCKED_STATE` 提示,且不改动任何计时状态:当 LC 的某条延迟命令(`lc restart/skip/random <秒>`)正在倒计时时(`IsDelayedCommandPending`),LC 自身会拒绝新的 `lc restart`,TwilightTimer 因此同样拒绝;若 `RestartCollection` 本身返回 false(调用时 LC 缺失、运行已结束),已被投机清零的计时器会被还原,TwilightTimer 回退到单关重载。
 
 ## R6.4 —— 战役"从菜单进入"的重试目标
 
@@ -167,7 +167,7 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 ## 构建
 
 ```bash
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
 `Directory.Build.props` 指向默认 Steam 安装目录下的托管 DLL 与 BepInEx core。其他平台用 `GAME_MANAGED` / `BEPINEX_CORE` 覆盖。
@@ -177,7 +177,7 @@ dotnet build src/HSRTimer/HSRTimer.csproj
 
 `TwilightTimer` 分支硬依赖 TwilightCore（编译期引用其构建产物 DLL +
 BepInDependency）并作为其计时引擎。比赛能力位于 `Match/` 与
-`HSRTimerApi`，仅在比赛对局内生效；本地游玩不受影响。完整行为、约束与
+`TwilightTimerApi`，仅在比赛对局内生效；本地游玩不受影响。完整行为、约束与
 验收场景映射见 [TWILIGHT_CUP.md](TWILIGHT_CUP.md)。与 TwilightCore 的
 集成契约（ITimerProvider）为依赖倒置：TwilightCore 拥有接口，本插件实现
 并自注册。

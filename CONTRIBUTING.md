@@ -1,4 +1,4 @@
-# Contributing to HSRTimer
+# Contributing to TwilightTimer
 
 Thanks for your interest in contributing! There are two main ways to help:
 
@@ -11,14 +11,14 @@ Simplified Chinese example is included. To add or improve a translation, read
 `\n` line escapes, UTF-8 (no BOM), and the submission steps.
 
 Quick start:
-1. Copy `src/HSRTimer/lang/en.txt` to `src/HSRTimer/lang/<your-code>.txt`.
+1. Copy `src/TwilightTimer/lang/en.txt` to `src/TwilightTimer/lang/<your-code>.txt`.
 2. Translate the right-hand side of each line. Keep the keys unchanged.
 3. Set `__LANG_NAME__:` to the display name of your language.
 4. Submit a pull request (or, if no remote yet, open an issue with the file).
 
 ## 2. Code — custom tags / rules
 
-HSRTimer's category system is extensible: any BepInEx plugin can register a
+TwilightTimer's category system is extensible: any BepInEx plugin can register a
 custom validity rule (a new "tag"). See **[docs/EXTENDING.md](docs/EXTENDING.md)**
 (中文: [docs/zh/EXTENDING.md](docs/zh/EXTENDING.md)) for the `ITagRule` API and
 a worked example.
@@ -27,8 +27,8 @@ a worked example.
 
 ```bash
 git clone <this repo>
-cd HSRTimer
-dotnet build src/HSRTimer/HSRTimer.csproj
+cd TwilightTimer
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module layout and the

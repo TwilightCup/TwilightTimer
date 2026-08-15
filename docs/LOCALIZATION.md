@@ -2,7 +2,7 @@
 
 > **中文版**: [zh/LOCALIZATION.md](zh/LOCALIZATION.md)
 
-HSRTimer's UI is fully localizable. English (`en.txt`) is the shipped base; a
+TwilightTimer's UI is fully localizable. English (`en.txt`) is the shipped base; a
 Simplified Chinese example (`zh-Hans.txt`) is included. This page is also the
 **contributor guide** for translators (R7.4).
 
@@ -11,7 +11,7 @@ Simplified Chinese example (`zh-Hans.txt`) is included. This page is also the
 All translation files live in the plugin runtime directory:
 
 ```
-<BepInEx config dir>/HSRTimer/lang/<code>.txt
+<BepInEx config dir>/TwilightTimer/lang/<code>.txt
 ```
 
 `<code>` is a **BCP 47 / IETF language tag**: `en`, `zh-Hans`, `ja`, `pt-BR`,
@@ -73,8 +73,8 @@ warning is logged (R7.2.4).
 
 ## How to contribute a translation
 
-1. Copy `src/HSRTimer/lang/en.txt` to `src/HSRTimer/lang/<your-code>.txt`
-   (and into `<config>/HSRTimer/lang/` to test in-game).
+1. Copy `src/TwilightTimer/lang/en.txt` to `src/TwilightTimer/lang/<your-code>.txt`
+   (and into `<config>/TwilightTimer/lang/` to test in-game).
 2. Translate the right-hand side of every line. **Do not change the keys.**
 3. Set `__LANG_NAME__:` to your language's display name.
 4. Keep section comments if you like (they help maintainers).

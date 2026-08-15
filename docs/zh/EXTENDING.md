@@ -1,8 +1,8 @@
-# 扩展 HSRTimer(自定义标签)
+# 扩展 TwilightTimer(自定义标签)
 
 > **English (source of truth)**: [../EXTENDING.md](../EXTENDING.md)
 
-HSRTimer 的标签系统可扩展(R3.7)。任何 BepInEx 插件都可注册一个**自定义标签规则** —— 新的有效性逻辑,用户在设置面板中勾选该标签 id 即可启用(持久化到 `tags.ini`)。内置标签(`Checkpoint`、`NoCheckpoint`、`Jumpless`、`Voiceline`)本身就是以这种方式注册的规则,因此自定义规则与内置规则走完全相同的引擎路径。
+TwilightTimer 的标签系统可扩展(R3.7)。任何 BepInEx 插件都可注册一个**自定义标签规则** —— 新的有效性逻辑,用户在设置面板中勾选该标签 id 即可启用(持久化到 `tags.ini`)。内置标签(`Checkpoint`、`NoCheckpoint`、`Jumpless`、`Voiceline`)本身就是以这种方式注册的规则,因此自定义规则与内置规则走完全相同的引擎路径。
 
 ## `ITagRule` 接口
 
@@ -25,7 +25,7 @@ public interface ITagRule
 ## 最小示例:"禁止坠落"标签
 
 ```csharp
-using HSRTimer;
+using TwilightTimer;
 using UnityEngine;
 
 public class NoFallRule : ITagRule
@@ -55,10 +55,10 @@ public class NoFallRule : ITagRule
 
 ## 注册规则
 
-在你的插件 `Awake` 中(HSRTimer 已加载之后 —— 声明依赖):
+在你的插件 `Awake` 中(TwilightTimer 已加载之后 —— 声明依赖):
 
 ```csharp
-[BepInDependency("HSRTimer")]
+[BepInDependency("TwilightTimer")]
 public class MyPlugin : BaseUnityPlugin
 {
     private void Awake()

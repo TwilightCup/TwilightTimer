@@ -2,7 +2,7 @@
 
 > [English](../TWILIGHT_CUP.md)
 
-本分支（`TwilightTimer`）是 HSRTimer 面向**黄昏杯** 1v1 速通比赛的特供版。
+本分支（`TwilightTimer`）是 TwilightTimer 面向**黄昏杯** 1v1 速通比赛的特供版。
 硬依赖 **TwilightCore**（选手端插件，提供 WebSocket、聊天、准备锁与内置
 Level Collections 引擎），并作为其计时引擎。所有比赛相关能力**只在比赛
 对局内生效**；本地练习与单机速通行为与 `main` 完全一致（依赖切换本身除外）。
@@ -19,7 +19,7 @@ Level Collections 引擎），并作为其计时引擎。所有比赛相关能�
 
 ## 比赛模式（T2）
 
-仅可经 `HSRTimerApi`（生产环境为 TwilightCore 的 `ITimerProvider` 适配器）
+仅可经 `TwilightTimerApi`（生产环境为 TwilightCore 的 `ITimerProvider` 适配器）
 进入/退出，设置面板无此开关。
 
 - 进入：快照用户标签集；面板标题加比赛徽标（"黄昏杯比赛 #回合号"）；
@@ -32,7 +32,7 @@ Level Collections 引擎），并作为其计时引擎。所有比赛相关能�
 
 ## 回合生命周期（T3）与事件（T4）
 
-`HSRTimerApi.StartRound(roundId, isSingle, retryCount, tags)` 执行完整重置
+`TwilightTimerApi.StartRound(roundId, isSingle, retryCount, tags)` 执行完整重置
 （手动重置范围 + 全部无效标记）并应用推送标签；计时仍在首个
 `PlayingLevel` 边沿开始。`StopRound()` 停止计时；分段数据保留可查至下一次
 `StartRound`。
@@ -67,7 +67,7 @@ HUD 标签行与面板类别页。
 
 ## 无 TwilightCore 驱动的调试（T1.6）
 
-`HSRTimerApi` 为直连面：EnterMatchMode / ExitMatchMode / StartRound /
+`TwilightTimerApi` 为直连面：EnterMatchMode / ExitMatchMode / StartRound /
 StopRound / SetRoundTags / RoundStatusString。
 
 ## 验收映射

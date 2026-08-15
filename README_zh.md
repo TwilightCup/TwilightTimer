@@ -1,8 +1,8 @@
-# HSRTimer
+# TwilightTimer
 
 《人类一败涂地》（*Human: Fall Flat*，`Human.exe` / `Human.app`）的速通自动计时器插件。
 
-HSRTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧为步进，不受卡顿或墙钟干扰作
+TwilightTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧为步进，不受卡顿或墙钟干扰作
 弊影响），依据游戏侧权威状态机自动判定关卡起止，依据可配置的速通"类别 / 标签"持续校验
 成绩有效性，渲染一个可编排的浮动信息面板，并提供完整的本地化支持。
 
@@ -28,12 +28,12 @@ HSRTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧为�
 ## 安装
 
 1. 为《人类一败涂地》安装 **BepInEx**(已测试 BepInEx 5.x / HarmonyX)。
-2. 自行构建(见下)或获取 `HSRTimer.dll`。
-3. 将 `HSRTimer.dll` 复制到游戏的 `BepInEx/plugins/` 目录。
+2. 自行构建(见下)或获取 `TwilightTimer.dll`。
+3. 将 `TwilightTimer.dll` 复制到游戏的 `BepInEx/plugins/` 目录。
 4. 将 `lang/*.txt` 复制到插件运行时目录
-   `<BepInEx 配置目录>/HSRTimer/lang/`
+   `<BepInEx 配置目录>/TwilightTimer/lang/`
    (插件首次运行时若该目录缺失会自动创建并写入默认文件)。
-5. 启动游戏，在 BepInEx 控制台确认出现 `HSRTimer is loaded!`。
+5. 启动游戏，在 BepInEx 控制台确认出现 `TwilightTimer is loaded!`。
 
 ### 可选: Level Collections
 
@@ -41,8 +41,8 @@ HSRTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧为�
 > 本仓库硬依赖 **TwilightCore** 及其内置的 Level Collections 模块。下述内容
 > 针对 `main` 分支。
 
-若安装了 [Level Collections](https://github.com/)(`LevelCollections`)插件，HSRTimer 会
-与之集成，将地图包的最后一关视为整局结束。HSRTimer 在没有该插件时也能正常工作(声明为
+若安装了 [Level Collections](https://github.com/)(`LevelCollections`)插件，TwilightTimer 会
+与之集成，将地图包的最后一关视为整局结束。TwilightTimer 在没有该插件时也能正常工作(声明为
 可选依赖 / soft dependency)。
 
 ## 构建
@@ -54,7 +54,7 @@ HSRTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧为�
 覆盖；详见 [docs/zh/TWILIGHT_CUP.md](docs/zh/TWILIGHT_CUP.md)。）
 
 ```bash
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
 构建会从默认的 Steam 安装路径解析游戏 / BepInEx 的 DLL 引用(见 `Directory.Build.props`)。
@@ -63,14 +63,14 @@ dotnet build src/HSRTimer/HSRTimer.csproj
 ```bash
 GAME_MANAGED="/路径/Human_Data/Managed" \
 BEPINEX_CORE="/路径/BepInEx/core" \
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
-产物为 `src/HSRTimer/bin/Debug/netstandard2.0/HSRTimer.dll`。
+产物为 `src/TwilightTimer/bin/Debug/netstandard2.0/TwilightTimer.dll`。
 
 ## 配置
 
-所有配置位于 `<BepInEx 配置目录>/HSRTimer/`:
+所有配置位于 `<BepInEx 配置目录>/TwilightTimer/`:
 
 | 文件 | 内容 |
 |------|------|

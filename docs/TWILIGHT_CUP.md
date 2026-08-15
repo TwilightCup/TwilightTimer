@@ -2,7 +2,7 @@
 
 > [中文版](zh/TWILIGHT_CUP.md)
 
-This branch (`TwilightTimer`) is the special edition of HSRTimer for the
+This branch (`TwilightTimer`) is the special edition of TwilightTimer for the
 **Twilight Cup** (黄昏杯) 1v1 speedrun competition. It hard-depends on
 **TwilightCore** (the player-side plugin providing WebSocket, chat, ready
 lock, and the built-in Level Collections engine) and serves as its timing
@@ -25,7 +25,7 @@ the dependency switch itself).
 
 ## Match mode (T2)
 
-Entered/exited only via `HSRTimerApi` (in production: TwilightCore's
+Entered/exited only via `TwilightTimerApi` (in production: TwilightCore's
 `ITimerProvider` adapter). No settings-panel switch exists.
 
 - On enter: the user's enabled tag set is snapshotted; the panel title is
@@ -41,7 +41,7 @@ Entered/exited only via `HSRTimerApi` (in production: TwilightCore's
 
 ## Round lifecycle (T3) and events (T4)
 
-`HSRTimerApi.StartRound(roundId, isSingle, retryCount, tags)` performs a full
+`TwilightTimerApi.StartRound(roundId, isSingle, retryCount, tags)` performs a full
 reset (manual-reset scope + all invalid marks) and applies the pushed tags;
 timing still starts at the first `PlayingLevel` edge. `StopRound()` stops
 timing; segment data stays queryable until the next `StartRound`.
@@ -81,7 +81,7 @@ re-exposed as the interface's events (per-subscriber try/catch). In-game,
 
 ## Driving without TwilightCore (debug)
 
-`HSRTimerApi` is the direct-consumption surface (T1.6): EnterMatchMode /
+`TwilightTimerApi` is the direct-consumption surface (T1.6): EnterMatchMode /
 ExitMatchMode / StartRound / StopRound / SetRoundTags / RoundStatusString.
 
 ## Acceptance mapping

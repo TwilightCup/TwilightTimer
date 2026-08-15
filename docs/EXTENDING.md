@@ -1,8 +1,8 @@
-# Extending HSRTimer (custom tags)
+# Extending TwilightTimer (custom tags)
 
 > **中文版**: [zh/EXTENDING.md](zh/EXTENDING.md)
 
-HSRTimer's tag system is extensible (R3.7). Any BepInEx plugin can
+TwilightTimer's tag system is extensible (R3.7). Any BepInEx plugin can
 register a **custom tag rule** — new validity logic that users opt into by
 enabling the tag id in the settings panel (persisted to `tags.ini`). The
 built-in tags (`Checkpoint`, `NoCheckpoint`, `Jumpless`, `Voiceline`) are
@@ -33,7 +33,7 @@ settings panel's Category page).
 ## Minimal example: a "no drowning" tag
 
 ```csharp
-using HSRTimer;
+using TwilightTimer;
 using UnityEngine;
 
 public class NoFallRule : ITagRule
@@ -63,10 +63,10 @@ public class NoFallRule : ITagRule
 
 ## Registering the rule
 
-In your plugin's `Awake` (after HSRTimer has loaded — declare a dependency):
+In your plugin's `Awake` (after TwilightTimer has loaded — declare a dependency):
 
 ```csharp
-[BepInDependency("HSRTimer")]
+[BepInDependency("TwilightTimer")]
 public class MyPlugin : BaseUnityPlugin
 {
     private void Awake()

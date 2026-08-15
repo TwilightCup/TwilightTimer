@@ -3,7 +3,7 @@
   <!--
     Default game install locations for the macOS Steam build of Human: Fall Flat.
     These are used as <HintPath> roots for the game/BepInEx DLL references in
-    HSRTimer.csproj. Override either property from the environment (CI, another
+    TwilightTimer.csproj. Override either property from the environment (CI, another
     platform, a non-default Steam library) by setting the env var of the same
     name before invoking `dotnet build`.
   -->

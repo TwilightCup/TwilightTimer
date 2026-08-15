@@ -1,8 +1,8 @@
-# HSRTimer
+# TwilightTimer
 
 A speedrun auto-timer plugin for *Human: Fall Flat* (`Human.exe` / `Human.app`).
 
-HSRTimer maintains a precise **game-time** clock (stepped by the game's physics
+TwilightTimer maintains a precise **game-time** clock (stepped by the game's physics
 frame, immune to lag and wall-clock manipulation), automatically detects level
 start/stop from the game's authoritative state machine, validates runs against
 configurable speedrun categories ("tags"), renders a configurable floating HUD,
@@ -34,12 +34,12 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the full specification.
 ## Install
 
 1. Install **BepInEx** for *Human: Fall Flat* (tested with BepInEx 5.x / HarmonyX).
-2. Build (see below) or obtain `HSRTimer.dll`.
-3. Copy `HSRTimer.dll` into the game's `BepInEx/plugins/` folder.
+2. Build (see below) or obtain `TwilightTimer.dll`.
+3. Copy `TwilightTimer.dll` into the game's `BepInEx/plugins/` folder.
 4. Copy the `lang/*.txt` files into the plugin runtime dir
-   `<BepInEx config dir>/HSRTimer/lang/`
+   `<BepInEx config dir>/TwilightTimer/lang/`
    (the plugin creates this dir and ships defaults on first run if absent).
-5. Launch the game; confirm `HSRTimer is loaded!` in the BepInEx console.
+5. Launch the game; confirm `TwilightTimer is loaded!` in the BepInEx console.
 
 > **Branch note (TwilightTimer)**: on the `TwilightTimer` branch — the
 > Twilight Cup special edition — this repository hard-depends on
@@ -49,8 +49,8 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the full specification.
 ### Optional: Level Collections (main branch)
 
 If the [Level Collections](https://github.com/) (`LevelCollections`) plugin is
-installed, HSRTimer integrates with it to treat a collection's final level as
-the end of a full run. HSRTimer works fine without it (declared as a soft
+installed, TwilightTimer integrates with it to treat a collection's final level as
+the end of a full run. TwilightTimer works fine without it (declared as a soft
 dependency).
 
 ## Build
@@ -58,7 +58,7 @@ dependency).
 Requires the .NET SDK (`dotnet`) and the game installed via Steam.
 
 ```bash
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
 On the `TwilightTimer` branch, build TwilightCore first — the csproj
@@ -73,14 +73,14 @@ platform, override the paths via environment variables:
 ```bash
 GAME_MANAGED="/path/to/Human_Data/Managed" \
 BEPINEX_CORE="/path/to/BepInEx/core" \
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
-The output is `src/HSRTimer/bin/Debug/netstandard2.0/HSRTimer.dll`.
+The output is `src/TwilightTimer/bin/Debug/netstandard2.0/TwilightTimer.dll`.
 
 ## Configuration
 
-All config lives under `<BepInEx config dir>/HSRTimer/`:
+All config lives under `<BepInEx config dir>/TwilightTimer/`:
 
 | File | Contents |
 |------|----------|

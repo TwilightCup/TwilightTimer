@@ -3,7 +3,7 @@
 > **中文版**: [zh/VOICELINE.md](zh/VOICELINE.md)
 
 The **Voiceline** tag (R3.6) requires the player to trigger every story
-voiceline in a level. This page explains how HSRTimer detects compliance — it is
+voiceline in a level. This page explains how TwilightTimer detects compliance — it is
 the subtlest tag, because a common skip trick leaves a detectable trace.
 
 ## What the game does
@@ -17,7 +17,7 @@ its private `wasPlayed` flag and never replays.
 There is also a special narrative audio source, conventionally named **"Easter"**,
 that plays a particular story clip.
 
-## How HSRTimer tracks it (`VoicelineTracker`)
+## How TwilightTimer tracks it (`VoicelineTracker`)
 
 1. **On level enter** — scan the scene:
    - `Object.FindObjectsOfType<NarrativeBlock>()` records every block's instance

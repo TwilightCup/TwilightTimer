@@ -2,8 +2,8 @@
 
 > **中文版**: [zh/CONFIG.md](zh/CONFIG.md)
 
-All config lives under `<BepInEx config dir>/HSRTimer/` (on a typical install,
-`~/Library/Application Support/Steam/steamapps/common/Human Fall Flat/BepInEx/config/HSRTimer/`).
+All config lives under `<BepInEx config dir>/TwilightTimer/` (on a typical install,
+`~/Library/Application Support/Steam/steamapps/common/Human Fall Flat/BepInEx/config/TwilightTimer/`).
 Files are human-readable, sectioned `key = value` text. `#` lines are comments.
 
 Every file is parsed **line by line, tolerantly**: a malformed line is skipped
@@ -55,7 +55,7 @@ Key codes are Unity's `KeyCode` enum names, e.g. `Backspace`, `Home`, `R`,
 
 ## tags.ini
 
-HSRTimer has **no category presets**. The active rule set is just the set of
+TwilightTimer has **no category presets**. The active rule set is just the set of
 tags the user has enabled (toggled in the settings panel's Category page).
 
 ```ini

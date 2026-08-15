@@ -2,7 +2,7 @@
 
 > **中文版**: [zh/CATEGORIES.md](zh/CATEGORIES.md)
 
-HSRTimer has **no category presets**. The active rule set is simply the set of
+TwilightTimer has **no category presets**. The active rule set is simply the set of
 **tags** (R3) you have enabled — toggle them on the **Category** page of the
 settings panel (default key `Home`). Each tag is a rule that decides which
 in-game behaviors invalidate a run.

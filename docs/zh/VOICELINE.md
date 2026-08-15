@@ -2,7 +2,7 @@
 
 > **English (source of truth)**: [../VOICELINE.md](../VOICELINE.md)
 
-**Voiceline** 标签(R3.6)要求玩家触发关卡内的全部剧情旁白。本页说明 HSRTimer 如何检测合规 —— 这是最微妙的标签,因为常见的跳过技巧会留下可检测的痕迹。
+**Voiceline** 标签(R3.6)要求玩家触发关卡内的全部剧情旁白。本页说明 TwilightTimer 如何检测合规 —— 这是最微妙的标签,因为常见的跳过技巧会留下可检测的痕迹。
 
 ## 游戏侧行为
 
@@ -10,7 +10,7 @@
 
 另有一个特殊的剧情音频源,约定名为 **"Easter"**,播放某段特定剧情音频。
 
-## HSRTimer 如何追踪(`VoicelineTracker`)
+## TwilightTimer 如何追踪(`VoicelineTracker`)
 
 1. **进入关卡时** —— 扫描场景:
    - `Object.FindObjectsOfType<NarrativeBlock>()` 记录每个 block 的实例 id 为"待触发"(必须触发)。

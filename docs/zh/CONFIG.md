@@ -2,8 +2,8 @@
 
 > **English (source of truth)**: [../CONFIG.md](../CONFIG.md)
 
-所有配置位于 `<BepInEx 配置目录>/HSRTimer/`(典型安装下为
-`~/Library/Application Support/Steam/steamapps/common/Human Fall Flat/BepInEx/config/HSRTimer/`)。
+所有配置位于 `<BepInEx 配置目录>/TwilightTimer/`(典型安装下为
+`~/Library/Application Support/Steam/steamapps/common/Human Fall Flat/BepInEx/config/TwilightTimer/`)。
 文件为人类可读的分节 `key = value` 文本,`#` 行为注释。
 
 每个文件都**逐行容错解析**:格式错误的行会被跳过,并在日志中给出文件名与行号的警告。插件绝不会因一行错误而无法启动(规格 N6)。缺失的键回退到默认值。
@@ -45,7 +45,7 @@ menu_key = Home
 
 ## tags.ini
 
-HSRTimer **没有类别预设**。当前的规则集就是用户启用的标签集合(在设置面板的"类别"页中勾选)。
+TwilightTimer **没有类别预设**。当前的规则集就是用户启用的标签集合(在设置面板的"类别"页中勾选)。
 
 ```ini
 [tags]

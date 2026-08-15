@@ -2,12 +2,12 @@
 
 > **中文版**: [zh/ARCHITECTURE.md](zh/ARCHITECTURE.md)
 
-This document explains how HSRTimer is structured and the design decisions
+This document explains how TwilightTimer is structured and the design decisions
 behind it. For the requirements, see [../REQUIREMENTS.md](../REQUIREMENTS.md).
 
 ## Guiding principle: poll, don't patch
 
-Almost every signal HSRTimer needs is a **public field or property** on the
+Almost every signal TwilightTimer needs is a **public field or property** on the
 game's classes:
 
 | Signal | Source |
@@ -66,7 +66,7 @@ Config/
 Localization/
   LocalizationService.cs, LanguageFile.cs
 LcIntegration.cs          TwilightCore built-in LC integration (direct API, hard dependency)
-HSRTimerApi.cs            public static debug/direct-consumption surface (Twilight Cup T1.6)
+TwilightTimerApi.cs            public static debug/direct-consumption surface (Twilight Cup T1.6)
 Match/                    Twilight Cup match support (see TWILIGHT_CUP.md)
   MatchMode.cs            match-mode state + user tag snapshot (T2)
   RoundTracker.cs         round lifecycle, segment records, queries (T3/T4.5/T5)
@@ -100,7 +100,7 @@ and no toggle restores them.
 ## Why retry unloads then re-launches the level
 
 R6.2 requires a **full async level reload**, including the empty transition
-scene (R6.2.1.3). HSRTimer drives it as a coroutine on the engine MonoBehaviour:
+scene (R6.2.1.3). TwilightTimer drives it as a coroutine on the engine MonoBehaviour:
 
 1. `Game.instance.UnloadLevel()` tears the running level down — `AfterUnload`
    sets `currentLevelNumber = -1`, `state = Inactive`, clears `currentLevel`
@@ -165,7 +165,7 @@ This is `R6.3`.
 
 Restarting a collection re-times the entire run from level 1, so it must take precedence over
 the single-level reload. Delegating to `lc restart` (rather than reflecting on LC internals) means
-HSRTimer reuses LC's scene-reload forcing (`ResetCurrentLevelIfSame`), level validation, and
+TwilightTimer reuses LC's scene-reload forcing (`ResetCurrentLevelIfSame`), level validation, and
 launching — and it works for both config collections and transient (`lc random`) runs. `Shell.RawInvoke`
 is the same code path the console uses, so the dispatched command behaves exactly like typing
 `lc restart`.
@@ -178,9 +178,9 @@ non-forgivable flags (R6.2.2 independence from R1.7 applies here too). Implement
 
 Two guard cases, both surfaced as `NOTIFY_RETRY_BLOCKED_STATE` without mutating any timer state:
 LC refuses a new `lc restart` while one of its delayed commands (`lc restart/skip/random <seconds>`)
-is counting down (`IsDelayedCommandPending`), so HSRTimer refuses too; and if `RestartCollection`
+is counting down (`IsDelayedCommandPending`), so TwilightTimer refuses too; and if `RestartCollection`
 itself returns false (LC absent at call time, run ended), the speculatively-zeroed timers are
-restored and HSRTimer falls back to the single-level reload.
+restored and TwilightTimer falls back to the single-level reload.
 
 ### R6.4 — the campaign "entered from menu" retry target
 
@@ -327,7 +327,7 @@ method plus one entry in the `ConfigRepair.Rules` array.
 ## Building
 
 ```bash
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
 `Directory.Build.props` points at the default Steam install's managed DLLs and
@@ -338,7 +338,7 @@ BepInEx core. Override `GAME_MANAGED` / `BEPINEX_CORE` for other platforms.
 
 The `TwilightTimer` branch hard-depends on TwilightCore (compile-time
 reference to its built DLL + BepInDependency) and serves as its timing
-engine. Match capabilities live in `Match/` and `HSRTimerApi` and activate
+engine. Match capabilities live in `Match/` and `TwilightTimerApi` and activate
 only inside a match session; local play is unaffected. See
 [TWILIGHT_CUP.md](TWILIGHT_CUP.md) for the full behavior, constraints, and
 the acceptance-scenario mapping. The integration contract with TwilightCore
