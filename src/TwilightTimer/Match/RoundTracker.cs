@@ -157,6 +157,15 @@ namespace TwilightTimer
             }
             else
             {
+                // SINGLE 最后一次尝试被跳过（如 lc skip 收尾）：尝试预算已用尽，
+                // 不可能有下一段开始来把 pending exit 转成 AttemptSkipped——
+                // 延迟判定在这里会永久悬死（既无 attempt_skip 也无完成信号）。
+                // 此刻「跳过 vs 中途退出」已无歧义，立即按跳过上报。
+                if (IsSingleProject && RetryCount > 0 && index + 1 >= RetryCount)
+                {
+                    TimerEvents.RaiseAttemptSkipped(index);
+                    return;
+                }
                 _pendingIncompleteExit = true;
                 _pendingExitIndex = index;
             }
