@@ -251,17 +251,25 @@ built-in level's `StartNextLevel` reload) is inherently a completion, and there
 `LastRun` (the "last run" total) is recorded at the instant a run is *completed*,
 and it must distinguish three unrelated endings that the game state alone can't
 tell apart. The rule runs in `EndSegment` when `completed` is true, using
-segment-start snapshots / per-tick latches (because by then the game/LC state has
-already moved on to whatever follows):
+segment-start snapshots (because by then the game/LC state has already moved on
+to whatever follows):
 
 - **Campaign → Credits**: a BuiltIn level whose number is `levelCount - 1` (the
   last playable level; the game then loads Credits at index `levelCount`).
 - **Standalone EditorPick**: an EditorPick level passed *outside* an LC
-  collection run (`InCollectionRunSegment` latch false).
+  collection run (`InCollectionRunSegment` snapshot false).
 - **Collection completion**: the last level of an LC collection run
-  (`OnCollectionLastLevel` latch). This one needs latching because LC ends the
-  run synchronously inside `Game.Fall`, before the engine's FixedUpdate observes
-  the state flip.
+  (`OnCollectionLastLevel` snapshot). Both LC flags are snapshotted at segment
+  start, not latched per tick: LC advances `CurrentLevelIndex` synchronously
+  inside `Game.Fall`, so when the second-to-last level is passed the index is
+  already "last level" during the window before the segment-end edge — a
+  per-tick latch would observe that and wrongly fire `RunCompleted` one level
+  early (premature `project_complete` in Twilight Cup MULTI rounds). A
+  segment-start snapshot keeps the judgment segment-scoped: only a segment that
+  *began* as the last level counts. This also covers the true completion edge —
+  LC ends the run synchronously inside `Game.Fall` (before the engine's
+  FixedUpdate observes the state flip), but the index does not change there, so
+  the start snapshot already captured "last level".
 
 (Workshop level passes alone are not a "run completion" — they don't end a run
 in the timer's sense.) A prior heuristic that recorded `LastRun` at any segment

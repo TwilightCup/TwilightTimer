@@ -67,22 +67,12 @@ namespace TwilightTimer
                 // can end on this very frame (the completion/leave flow clears
                 // Game.passedLevel itself before the state flips), so EndSegment
                 // must see that the level was passed while it still could be
-                // observed.
+                // observed. (The LC collection-run context is NOT latched here —
+                // it is snapshotted at segment start in StartSegment, because a
+                // per-tick latch gets polluted by LC's synchronous index advance
+                // inside Game.Fall; see StartSegment.)
                 if (State.InSegment && game.passedLevel)
                     State.LevelPassed = true;
-
-                // Latch the LC collection-run context for the same reason: LC
-                // ends/advances the run synchronously inside Game.Fall, before
-                // this FixedUpdate observes the state flip — EndSegment must see
-                // where this segment sat in the run while that was still
-                // observable.
-                if (State.InSegment && LcIntegration.Instance != null)
-                {
-                    if (LcIntegration.Instance.IsInCollectionRun)
-                        State.InCollectionRunSegment = true;
-                    if (LcIntegration.Instance.IsLastLevelOfCollection)
-                        State.OnCollectionLastLevel = true;
-                }
 
                 // Detect transitions first (uses cached prev), then accumulate,
                 // then run per-tick rules.
@@ -176,6 +166,29 @@ namespace TwilightTimer
 
             int cp = game.currentCheckpointNumber;
             State.BeginSegment(State.GameTime, game.currentLevelNumber, game.currentLevelType, cp);
+
+            // Snapshot the LC collection-run context AT SEGMENT START, together
+            // with the level-number/type snapshots BeginSegment just took. Both
+            // describe "which level is THIS segment" and must be immune to what
+            // happens later inside the segment: when the second-to-last level is
+            // passed, LC's Harmony patch advances CurrentLevelIndex
+            // synchronously inside Game.Fall — BEFORE the async level load flips
+            // the game state and EndSegment runs. A per-tick latch polled here
+            // would observe the advanced index ("now on the last level") during
+            // that window and wrongly classify the ended segment as the
+            // collection's last level (premature RunCompleted on the
+            // second-to-last pass). Snapshotting at segment start keeps the
+            // judgment segment-scoped: only a segment that BEGAN as the last
+            // level counts as the collection's completion edge. This also
+            // preserves the EndCollectionRun case (the true last level's pass
+            // ends the run synchronously, but the index does not change — the
+            // start snapshot already captured "last level").
+            var lc = LcIntegration.Instance;
+            if (lc != null)
+            {
+                State.InCollectionRunSegment = lc.IsInCollectionRun;
+                State.OnCollectionLastLevel = lc.IsLastLevelOfCollection;
+            }
             // T3/T4: assign the segment its round ordinal (and resolve a
             // pending unpassed exit as a skip when another segment follows).
             RoundTracker.OnSegmentStart();
@@ -250,9 +263,10 @@ namespace TwilightTimer
             // game then loads Credits — levelCount-1 is the last playable level,
             // levelCount itself is Credits); (b) a standalone EditorPick level
             // was passed (outside a collection run); (c) the last level of an LC
-            // collection run was passed. All use segment-start snapshots /
-            // latches (CurrentLevelType, OnCollectionLastLevel) because by now
-            // the game/LC state has already moved on to whatever follows.
+            // collection run was passed. All use segment-start snapshots
+            // (CurrentLevelType, InCollectionRunSegment, OnCollectionLastLevel —
+            // captured in StartSegment) because by now the game/LC state has
+            // already moved on to whatever follows.
             if (!retrying && completed)
             {
                 bool campaignDone = State.CurrentLevelType == WorkshopItemSource.BuiltIn

@@ -145,11 +145,11 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 
 ## 什么算"整局完成"(LastRun)
 
-`LastRun`("上一局"总时间)在整局**完成**的那一刻记录,而它必须区分三种互不相关的收尾方式 —— 仅凭游戏状态无法区分。规则在 `EndSegment` 且 `completed` 为真时执行,使用分段开始时的快照 / 每帧锁存(因为此时游戏 / LC 的状态早已切换到后续内容):
+`LastRun`("上一局"总时间)在整局**完成**的那一刻记录,而它必须区分三种互不相关的收尾方式 —— 仅凭游戏状态无法区分。规则在 `EndSegment` 且 `completed` 为真时执行,使用分段开始时的快照(因为此时游戏 / LC 的状态早已切换到后续内容):
 
 - **官方战役进 Credits**:BuiltIn 关卡序号等于 `levelCount - 1`(最后一个可玩关卡;游戏随后加载索引 `levelCount` 的 Credits)。
-- **单独的 EditorPick**:在 LC 地图包运行**之外**完成的 EditorPick 关卡(`InCollectionRunSegment` 锁存为假)。
-- **地图包完成**:LC 地图包的最后一关(`OnCollectionLastLevel` 锁存)。这一条必须锁存,因为 LC 在 `Game.Fall` 内同步结束运行,早于引擎 FixedUpdate 观察到状态翻转。
+- **单独的 EditorPick**:在 LC 地图包运行**之外**完成的 EditorPick 关卡(`InCollectionRunSegment` 快照为假)。
+- **地图包完成**:LC 地图包的最后一关(`OnCollectionLastLevel` 快照)。两个 LC 标志都在**分段开始时快照**,而非每帧锁存:LC 在 `Game.Fall` 内同步推进 `CurrentLevelIndex`,倒数第二关被通过后的窗口期内索引已是"最后一关"——每帧锁存会观察到它,从而提前一关误触发 `RunCompleted`(Twilight Cup MULTI 回合的过早 `project_complete`)。分段开始时快照使判定限定在分段粒度:只有**以最后一关开始**的分段才算完成边沿。这也覆盖真正的完成边沿——LC 在 `Game.Fall` 内同步结束运行(早于引擎 FixedUpdate 观察到状态翻转),但该处索引不变,开始快照早已捕获"最后一关"。
 
 (单独的 Workshop 关卡通关不算"整局完成" —— 在计时器的语义里它不结束一局。)过去那个"任何分段开始时时钟还在跑就记录 LastRun"的启发式已移除:它会在战役中途的每个关卡边界误触发,而 EditorPick/Workshop 的收尾又永远捕不到;现在 `LastRun` 只在上述真正的完成时更新。
 

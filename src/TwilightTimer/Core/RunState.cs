@@ -94,18 +94,25 @@ namespace TwilightTimer
 
         /// <summary>
         /// Whether the current segment is on the LAST level of an LC collection
-        /// run, latched per tick from <c>LcIntegration.IsLastLevelOfCollection</c>.
-        /// Latching is required because LC's Harmony patch ends the run
-        /// synchronously inside <c>Game.Fall</c> (before the engine's next
-        /// FixedUpdate observes the state flip) — by the time EndSegment runs,
-        /// <c>IsInCollectionRun</c> is already false. Cleared on segment start
-        /// and reset.
+        /// run, snapshotted at SEGMENT START from
+        /// <c>LcIntegration.IsLastLevelOfCollection</c>. Snapshotting (rather
+        /// than per-tick latching) is required for a segment-scoped judgment:
+        /// when the second-to-last level is passed, LC advances
+        /// <c>CurrentLevelIndex</c> synchronously inside <c>Game.Fall</c> —
+        /// before the level load flips the game state and EndSegment runs — so
+        /// a per-tick latch would observe the advanced index mid-segment and
+        /// wrongly mark the ended (second-to-last) segment as the last level.
+        /// Snapshotting also covers the true completion edge (LC ends the run
+        /// synchronously inside <c>Game.Fall</c>, so <c>IsInCollectionRun</c>
+        /// is already false by the time EndSegment runs — but the index did not
+        /// change, and the start snapshot captured "last level"). Cleared on
+        /// segment start and reset.
         /// </summary>
         public bool OnCollectionLastLevel;
 
         /// <summary>
         /// Whether the current segment is inside an LC collection run (on ANY
-        /// of its levels), latched per tick from
+        /// of its levels), snapshotted at SEGMENT START from
         /// <c>LcIntegration.IsInCollectionRun</c>. Companion to
         /// <see cref="OnCollectionLastLevel"/>: used to tell a *standalone*
         /// EditorPick completion (which ends its run) apart from a mid-collection
