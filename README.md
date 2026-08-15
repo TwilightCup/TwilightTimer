@@ -48,7 +48,8 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) for the full specification.
 
 ### Optional: Level Collections (main branch)
 
-If the [Level Collections](https://github.com/) (`LevelCollections`) plugin is
+If the [Level Collections](https://github.com/HeyBlack233/LevelCollections)
+(`LevelCollections`) plugin is
 installed, TwilightTimer integrates with it to treat a collection's final level as
 the end of a full run. TwilightTimer works fine without it (declared as a soft
 dependency).

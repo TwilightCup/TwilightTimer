@@ -41,7 +41,7 @@ TwilightTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧
 > 本仓库硬依赖 **TwilightCore** 及其内置的 Level Collections 模块。下述内容
 > 针对 `main` 分支。
 
-若安装了 [Level Collections](https://github.com/)(`LevelCollections`)插件，TwilightTimer 会
+若安装了 [Level Collections](https://github.com/HeyBlack233/LevelCollections)(`LevelCollections`)插件，TwilightTimer 会
 与之集成，将地图包的最后一关视为整局结束。TwilightTimer 在没有该插件时也能正常工作(声明为
 可选依赖 / soft dependency)。
 
