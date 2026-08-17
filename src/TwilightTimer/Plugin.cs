@@ -60,6 +60,11 @@ namespace TwilightTimer
             //    in time for any round; mutating calls are marshaled to the
             //    main thread by the adapter itself.
             TwilightTimerProvider.Register();
+
+            // 6. Probe TwilightCore's (future) leaderboard feed API. Absent
+            //    today → the leaderboard HUD runs in local-only transition
+            //    mode (see Match/LeaderboardFeed.cs / docs/LEADERBOARD_REQ.md).
+            LeaderboardFeed.Init();
         }
 
         private void OnDestroy()
@@ -88,6 +93,10 @@ namespace TwilightTimer
             var hudGo = new GameObject("TwilightTimer.Hud");
             Object.DontDestroyOnLoad(hudGo);
             hudGo.AddComponent<TimerHud>();
+
+            var lbGo = new GameObject("TwilightTimer.LeaderboardHud");
+            Object.DontDestroyOnLoad(lbGo);
+            lbGo.AddComponent<LeaderboardHud>();
 
             var panelGo = new GameObject("TwilightTimer.Panel");
             Object.DontDestroyOnLoad(panelGo);

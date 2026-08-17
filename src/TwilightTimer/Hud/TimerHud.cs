@@ -49,23 +49,7 @@ namespace TwilightTimer
         /// <summary>(Re)create the dynamic OS font when the configured size changes.</summary>
         private void EnsureFont(int size)
         {
-            if (size <= 0) size = 18;
-            if (_font != null && _appliedFontSize == size) return;
-            try
-            {
-                // A dynamic OS font with a broad fallback list renders Latin + CJK.
-                _font = Font.CreateDynamicFontFromOSFont(new[]
-                {
-                    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
-                    "Noto Sans CJK", "Heiti SC", "Arial Unicode MS", "Arial",
-                }, size);
-                _appliedFontSize = size;
-            }
-            catch (System.Exception ex)
-            {
-                Plugin.Logger.LogWarning($"TwilightTimer: dynamic font creation failed: {ex.Message}");
-                _font = null;
-            }
+            HudFont.EnsureDynamic(ref _font, ref _appliedFontSize, size);
         }
 
         private void OnGUI()
@@ -264,8 +248,12 @@ namespace TwilightTimer
             }
         }
 
-        /// <summary>Draw one line with a left→right two-color gradient, per character.</summary>
-        private static void DrawGradientLine(string text, Color a, Color b, float x, float y, GUIStyle style)
+        /// <summary>
+        /// Draw one line with a left→right two-color gradient, per character.
+        /// Internal so the other HUD components (<see cref="LeaderboardHud"/>)
+        /// render with the identical per-character style.
+        /// </summary>
+        internal static void DrawGradientLine(string text, Color a, Color b, float x, float y, GUIStyle style)
         {
             if (string.IsNullOrEmpty(text)) return;
             style.alignment = TextAnchor.UpperLeft;

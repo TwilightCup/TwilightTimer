@@ -18,10 +18,12 @@ auto_reset = true
 restart_clears_forgivable = false
 retry_min_dwell = 0.5
 show_hud = true
+show_leaderboard = true
 language = en
 reset_key = Backspace
 retry_key = R
 menu_key = Home
+leaderboard_key = Tab
 ```
 
 | 键 | 取值 | 默认 | 说明 |
@@ -32,10 +34,12 @@ menu_key = Home
 | `restart_clears_forgivable` | true/false | false | R5.4.3 —— 在关卡内**暂停菜单**点击"重新开始"时清除可原谅的有效性标记(计时器继续计时,不重置)。一键重试则无条件清除(固定行为);整局重置会清除全部标记。 |
 | `retry_min_dwell` | 秒(≥0) | 0.5 | R6 重试时在空场景强制停留的最短时间,从按下重试键开始计。若关卡重载快于该值,则在空场景内等待到该时间后再重载;`0` 表示不强制停留。 |
 | `show_hud` | true/false | true | R2.5.1 |
+| `show_leaderboard` | true/false | true | 对局排行榜 HUD(仍受 `show_hud` 总开关约束;见 [HUD.md](HUD.md)) |
 | `language` | BCP-47 代码 | en | 对应一个 `lang/<code>.txt` |
 | `reset_key` | KeyCode | Backspace | 重置成绩键 |
 | `retry_key` | KeyCode | R | 重试关卡键 |
 | `menu_key` | KeyCode | Home | 打开/关闭设置面板键 |
+| `leaderboard_key` | KeyCode | Tab | 显示/隐藏对局排行榜 |
 
 > **作弊 / 变速 / 漂移检测(R5.1)始终开启,阈值为硬编码,刻意不可配置** —— `settings.ini` 中没有 `drift_tolerance` 或任何其他反作弊选项。
 
@@ -82,11 +86,19 @@ color_b = CCCCCCCF
 x = 400
 y = 80
 text = Collection: {collection}
+
+[leaderboard]
+margin_x = 16
+offset_y = 0
+font_size = 0
+seat_a_color = 4F9DFFFF
+seat_b_color = FF5A5AFF
 ```
 
 - `[text]` —— 主文本块直接绘制在屏幕上(无窗口、不可拖动)。`offset_x`/`offset_y` 为距屏幕左上角的像素偏移;`font_size` 为字号;`color_a`/`color_b` 为默认双色渐变(十六进制,见 [HUD.md](HUD.md))。
 - `[rows]` —— 有序行;键为从 0 开始的索引。行类型:`GameTime`、`CurrentSegment`、`LastSegment`、`LastRun`、`CurrentState`。
 - `[custom.<n>]` —— 位于 `(x, y)` 的任意屏上文本,各自带渐变。模板变量:`{date}`、`{time}`、`{version}`、`{collection}`、`{category}`、`{gametime}`。
+- `[leaderboard]` —— 对局排行榜(锚点在屏幕左缘垂直居中;见 [HUD.md](HUD.md)):`margin_x`(距左缘像素)、`offset_y`(垂直居中微调)、`font_size`(`0` = 跟随 `[text] font_size`)、`seat_a_color`/`seat_b_color`(座席名字颜色,十六进制)。
 
 整个计时器的显示/隐藏由 `settings.ini` 中的 `show_hud`(及切换面板键)控制,不在 `layout.ini` 中。
 

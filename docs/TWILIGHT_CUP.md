@@ -79,6 +79,20 @@ queries are point-in-time snapshots; the internal `TimerEvents` are
 re-exposed as the interface's events (per-subscriber try/catch). In-game,
 `twi sim status` prints the registered provider's live state.
 
+## In-match leaderboard
+
+`Hud/LeaderboardHud.cs` renders a real-time leaderboard during match rounds,
+anchored at the middle of the left screen edge in the timer's own style
+(see [HUD.md](HUD.md) for formats/sorting/config). The data direction is the
+reverse of the provider: TwilightCore owns the server-fed state and this
+plugin consumes it. The seam is `Match/LeaderboardFeed.cs` — a reflection
+gateway probing for `TwilightCore.Leaderboard.LeaderboardApi` (specified in
+[LEADERBOARD_REQ.md](LEADERBOARD_REQ.md)); until TwilightCore implements
+that API, the gateway probe fails cleanly and the leaderboard runs in
+**transition mode**: the local row only, built entirely from
+`RoundTracker` / `RunState` / `CollectionManager`, name falling back to the
+localized "You" and no seat colour.
+
 ## Driving without TwilightCore (debug)
 
 `TwilightTimerApi` is the direct-consumption surface (T1.6): EnterMatchMode /

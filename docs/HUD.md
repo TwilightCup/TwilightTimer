@@ -96,3 +96,35 @@ listing the reason(s). See [CONFIG.md](CONFIG.md) for the validity options.
 The panel uses a dynamic OS font with a CJK-capable fallback chain (PingFang /
 Microsoft YaHei / Noto Sans CJK …), so localized text in Chinese/Japanese
 renders correctly. Verify rendering on your platform.
+
+## Match leaderboard
+
+During a Twilight Cup match round a second component renders in the timer's
+style, anchored at the **middle of the left screen edge** (vertically
+centred). One row per player, sorted progress-first (deeper level first;
+equal progress → lower total first; single-level rounds sort by score, best
+first, no-score last):
+
+- **Multi-level rounds**: `{name} {currentLevelName} {total at arriving the current level}` — the total is frozen at level arrival and shown with seconds precision only.
+- **Single-level rounds**: `{name} {score}` — the final score (fastest attempt or average, per the match config) at full precision.
+
+The name is drawn in the player's seat colour (PLAYER_A blue / PLAYER_B red,
+configurable); the rest of the row keeps the default gradient. Rows are fed
+by TwilightCore's leaderboard API (see
+[LEADERBOARD_REQ.md](LEADERBOARD_REQ.md)); before that API exists the
+component runs in **transition mode** — local row only, seat unknown →
+default gradient, name falls back to the localized "You".
+
+Hidden entirely outside match rounds. Toggles: the leaderboard keybind
+(default `Tab`, rebindable like the other keys in the settings panel), the
+`show_leaderboard` setting (which the keybind flips, also editable in the
+settings panel), and the `show_hud` master. Layout keys in `layout.ini`:
+
+```ini
+[leaderboard]
+margin_x = 16          # px from the left screen edge
+offset_y = 0           # nudge from vertical centre
+font_size = 0          # 0 = follow [text] font_size
+seat_a_color = 4F9DFFFF
+seat_b_color = FF5A5AFF
+```

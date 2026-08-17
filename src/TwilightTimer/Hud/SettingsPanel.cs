@@ -212,6 +212,7 @@ namespace TwilightTimer
             KeybindRow(loc, "SETTINGS_RETRY_KEY", () => s.RetryKey, k => s.RetryKey = k);
             GUI.enabled = true;
             KeybindRow(loc, "SETTINGS_MENU_KEY", () => s.MenuKey, k => s.MenuKey = k);
+            KeybindRow(loc, "SETTINGS_LEADERBOARD_KEY", () => s.LeaderboardKey, k => s.LeaderboardKey = k);
         }
 
         // ── Page: Interface (HUD appearance) ──
@@ -221,6 +222,7 @@ namespace TwilightTimer
             //  hardcoded thresholds — intentionally not user-configurable.)
             Section(loc.Get("PANEL_HUD"));
             cfg.Settings.ShowHud = Toggle(loc.Get("SETTINGS_SHOW_HUD"), cfg.Settings.ShowHud);
+            cfg.Settings.ShowLeaderboard = Toggle(loc.Get("SETTINGS_SHOW_LEADERBOARD"), cfg.Settings.ShowLeaderboard);
             cfg.Layout.OffsetX = FloatFieldRow(loc.Get("PANEL_OFFSET_X"), cfg.Layout.OffsetX);
             cfg.Layout.OffsetY = FloatFieldRow(loc.Get("PANEL_OFFSET_Y"), cfg.Layout.OffsetY);
             cfg.Layout.FontSize = Mathf.RoundToInt(SliderRow(loc.Get("PANEL_FONT_SIZE"), cfg.Layout.FontSize, 8, 72));
@@ -332,6 +334,7 @@ namespace TwilightTimer
             if (key == "SETTINGS_RESET_KEY") s.ResetKey = pressed;
             else if (key == "SETTINGS_RETRY_KEY") s.RetryKey = pressed;
             else if (key == "SETTINGS_MENU_KEY") s.MenuKey = pressed;
+            else if (key == "SETTINGS_LEADERBOARD_KEY") s.LeaderboardKey = pressed;
         }
 
         // Multi-select of rule tags. There are no category presets — every

@@ -82,5 +82,11 @@ namespace TwilightTimer
 
         /// <summary>Human-readable round status for console/debug output.</summary>
         public static string RoundStatusString() => RoundTracker.StatusString();
+
+        /// <summary>
+        /// Human-readable leaderboard state (feed availability, scoring mode,
+        /// sorted rows) for console driving / acceptance testing.
+        /// </summary>
+        public static string LeaderboardStatusString() => LeaderboardState.StatusString();
     }
 }

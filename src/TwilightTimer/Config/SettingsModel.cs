@@ -23,16 +23,18 @@ namespace TwilightTimer
 
         // ── HUD ──
         public bool ShowHud = true;               // R2.5.1
+        public bool ShowLeaderboard = true;       // in-match leaderboard HUD
 
         // ── Identity / selection ──
         // Note: there are no category presets; the enabled tag set is stored in
         // tags.ini (see EnabledTagsModel). Only the language choice lives here.
         public string CurrentLang = "en";
 
-        // ── Keybinds (R1.7.1 reset, R6.1 retry, settings panel) ──
+        // ── Keybinds (R1.7.1 reset, R6.1 retry, settings panel, leaderboard) ──
         public KeyCode ResetKey = KeyCode.Backspace;
         public KeyCode RetryKey = KeyCode.R;
         public KeyCode MenuKey = KeyCode.Home;
+        public KeyCode LeaderboardKey = KeyCode.Tab;
 
         private const string Section = "settings";
 
@@ -58,10 +60,12 @@ namespace TwilightTimer
                     case "restart_clears_forgivable": RestartClearsForgivable = ParseBool(value, RestartClearsForgivable); break;
                     case "retry_min_dwell": RetryMinDwell = ParseFloat(value, RetryMinDwell); break;
                     case "show_hud": ShowHud = ParseBool(value, ShowHud); break;
+                    case "show_leaderboard": ShowLeaderboard = ParseBool(value, ShowLeaderboard); break;
                     case "language": CurrentLang = value; break;
                     case "reset_key": ResetKey = ParseKeyCode(value, ResetKey); break;
                     case "retry_key": RetryKey = ParseKeyCode(value, RetryKey); break;
                     case "menu_key": MenuKey = ParseKeyCode(value, MenuKey); break;
+                    case "leaderboard_key": LeaderboardKey = ParseKeyCode(value, LeaderboardKey); break;
                     default:
                         Plugin.Logger.LogWarning($"TwilightTimer: settings.ini: unknown key '{key}', ignored.");
                         break;
@@ -83,10 +87,12 @@ namespace TwilightTimer
                 ["restart_clears_forgivable"] = RestartClearsForgivable ? "true" : "false",
                 ["retry_min_dwell"] = RetryMinDwell.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
                 ["show_hud"] = ShowHud ? "true" : "false",
+                ["show_leaderboard"] = ShowLeaderboard ? "true" : "false",
                 ["language"] = CurrentLang,
                 ["reset_key"] = ResetKey.ToString(),
                 ["retry_key"] = RetryKey.ToString(),
                 ["menu_key"] = MenuKey.ToString(),
+                ["leaderboard_key"] = LeaderboardKey.ToString(),
             };
             PersistenceService.Write(
                 PersistenceService.PathFor("settings.ini"),

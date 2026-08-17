@@ -65,6 +65,18 @@ HUD 标签行与面板类别页。
 `TimerEvents` 转暴露为接口事件（逐订阅者 try/catch）。游戏内
 `twi sim status` 会打印已注册提供方的实时状态。
 
+## 对局排行榜
+
+`Hud/LeaderboardHud.cs` 在比赛回合内渲染实时排行榜，锚点在屏幕左缘
+垂直居中处，风格与计时器一致（格式/排序/配置见
+[HUD.md](HUD.md)）。其数据方向与提供方相反：TwilightCore 持有服务器
+汇总的状态，本插件消费。接缝为 `Match/LeaderboardFeed.cs` —— 反射
+探测 `TwilightCore.Leaderboard.LeaderboardApi`（契约见
+[LEADERBOARD_REQ.md](../LEADERBOARD_REQ.md)）；在 TwilightCore 实现该
+接口之前，探测干净地失败，排行榜以**过渡模式**运行：仅本地一行，
+完全由 `RoundTracker` / `RunState` / `CollectionManager` 构建，名字
+回退为本地化的「你」，无座席配色。
+
 ## 无 TwilightCore 驱动的调试（T1.6）
 
 `TwilightTimerApi` 为直连面：EnterMatchMode / ExitMatchMode / StartRound /

@@ -21,11 +21,13 @@ auto_reset = true
 restart_clears_forgivable = false
 retry_min_dwell = 0.5
 show_hud = true
+show_leaderboard = true
 language = en
 category = any
 reset_key = Backspace
 retry_key = R
 menu_key = Home
+leaderboard_key = Tab
 ```
 
 | Key | Values | Default | Notes |
@@ -36,11 +38,13 @@ menu_key = Home
 | `restart_clears_forgivable` | true/false | false | R5.4.3 — clear forgivable validity flags when the level is restarted from the in-level **pause menu** (the run's timers keep running). The one-key retry clears them unconditionally (fixed behavior), and a full-run reset clears all flags. |
 | `retry_min_dwell` | seconds (≥0) | 0.5 | R6 — minimum time held in the empty scene on retry, measured from the key press. If the level reloads faster, the empty scene is held until this elapses; `0` disables the hold. |
 | `show_hud` | true/false | true | R2.5.1 |
+| `show_leaderboard` | true/false | true | in-match leaderboard HUD (still gated by `show_hud`; see [HUD.md](HUD.md)) |
 | `language` | BCP-47 code | en | matches a `lang/<code>.txt` |
 | `category` | category id | any | R3.1 |
 | `reset_key` | KeyCode | Backspace | reset-run keybind |
 | `retry_key` | KeyCode | R | retry-level keybind |
 | `menu_key` | KeyCode | Home | open/close the settings panel |
+| `leaderboard_key` | KeyCode | Tab | show/hide the match leaderboard |
 
 > **Cheat/speed/drift detection (R5.1) is always on with hardcoded thresholds
 > and is intentionally not configurable** — there is no `drift_tolerance` or any
@@ -96,6 +100,13 @@ color_b = CCCCCCCF
 x = 400
 y = 80
 text = Collection: {collection}
+
+[leaderboard]
+margin_x = 16
+offset_y = 0
+font_size = 0
+seat_a_color = 4F9DFFFF
+seat_b_color = FF5A5AFF
 ```
 
 - `[text]` — the main text block is drawn directly on screen (no window, not
@@ -107,6 +118,10 @@ text = Collection: {collection}
 - `[custom.<n>]` — arbitrary on-screen texts at `(x, y)` with their own gradient.
   Template variables: `{date}`, `{time}`, `{version}`, `{collection}`,
   `{category}`, `{gametime}`.
+- `[leaderboard]` — the in-match leaderboard (left-edge-centre anchor; see
+  [HUD.md](HUD.md)): `margin_x` (px from the left edge), `offset_y` (nudge
+  from vertical centre), `font_size` (`0` = follow `[text] font_size`),
+  `seat_a_color`/`seat_b_color` (seat name colours, hex).
 
 Show/hide of the whole timer is controlled by `show_hud` in `settings.ini`
 (and the Toggle HUD keybind), not in `layout.ini`.

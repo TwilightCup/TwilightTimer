@@ -71,6 +71,10 @@ namespace TwilightTimer
     /// Formats durations for the HUD. Speedrun-style: HH:MM:SS for >= 1 hour,
     /// MM:SS.mmm otherwise. Negative or unset values render as "--:--".
     /// </summary>
+    /// <remarks>
+    /// Also home to <see cref="FormatSeconds(double?)"/> — the seconds-only
+    /// variant used by the match leaderboard.
+    /// </remarks>
     public static class TimeFormatter
     {
         public static string Format(double? secondsNullable)
@@ -95,6 +99,30 @@ namespace TwilightTimer
                 sb.Append(h).Append(':').Append(Two(m)).Append(':').Append(Two(s));
             else
                 sb.Append(Two(m)).Append(':').Append(Two(s)).Append('.').Append(Three(totalMs));
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Formats a duration with seconds precision only — MM:SS, or
+        /// HH:MM:SS at ≥ 1 hour. Same conventions as <see cref="Format(double)"/>
+        /// (negative clamps to zero) but without the fractional part. Used by
+        /// the match leaderboard's MULTI total (frozen at level arrival).
+        /// </summary>
+        public static string FormatSeconds(double? secondsNullable)
+        {
+            if (!secondsNullable.HasValue || secondsNullable.Value < 0d)
+                return "--:--";
+            double seconds = secondsNullable.Value;
+            // Round half-up to whole seconds before decomposing.
+            int total = (int)(seconds + 0.5);
+            int h = total / 3600;
+            int m = (total % 3600) / 60;
+            int s = total % 60;
+            var sb = new StringBuilder();
+            if (h > 0)
+                sb.Append(h).Append(':').Append(Two(m)).Append(':').Append(Two(s));
+            else
+                sb.Append(Two(m)).Append(':').Append(Two(s));
             return sb.ToString();
         }
 

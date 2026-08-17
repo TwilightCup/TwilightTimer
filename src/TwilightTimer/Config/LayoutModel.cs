@@ -67,6 +67,24 @@ namespace TwilightTimer
 
         public Color ColorB = new Color(1f, 0.95f, 0.6f, 1f);
 
+        // ── Match leaderboard (in-match HUD anchored at the left edge's
+        // vertical centre; see LeaderboardHud). Section [leaderboard]. ──
+
+        /// <summary>Leaderboard margin from the left screen edge (px).</summary>
+        public float LeaderboardMarginX = 16f;
+
+        /// <summary>Leaderboard vertical offset from screen centre (px).</summary>
+        public float LeaderboardOffsetY = 0f;
+
+        /// <summary>Leaderboard font size; 0 = follow <see cref="FontSize"/>.</summary>
+        public int LeaderboardFontSize = 0;
+
+        /// <summary>Seat name colour: PLAYER_A (blue).</summary>
+        public Color LeaderboardSeatAColor = new Color(0.31f, 0.62f, 1f, 1f);
+
+        /// <summary>Seat name colour: PLAYER_B (red).</summary>
+        public Color LeaderboardSeatBColor = new Color(1f, 0.35f, 0.35f, 1f);
+
         public void Load()
         {
             CustomTexts.Clear();
@@ -90,6 +108,17 @@ namespace TwilightTimer
                     int idx;
                     if (int.TryParse(p.Key, out idx) && System.Enum.TryParse(p.Value, true, out RowType rt))
                         rowsByKey[idx] = rt;
+                }
+                else if (p.Section == "leaderboard")
+                {
+                    switch (p.Key)
+                    {
+                        case "margin_x": LeaderboardMarginX = ParseFloat(p.Value, LeaderboardMarginX); break;
+                        case "offset_y": LeaderboardOffsetY = ParseFloat(p.Value, LeaderboardOffsetY); break;
+                        case "font_size": LeaderboardFontSize = ParseInt(p.Value, LeaderboardFontSize); break;
+                        case "seat_a_color": LeaderboardSeatAColor = GradientText.ParseColor(p.Value, LeaderboardSeatAColor); break;
+                        case "seat_b_color": LeaderboardSeatBColor = GradientText.ParseColor(p.Value, LeaderboardSeatBColor); break;
+                    }
                 }
                 else if (p.Section.StartsWith("custom."))
                 {
@@ -147,6 +176,16 @@ namespace TwilightTimer
                 rows[i.ToString()] = Rows[i].ToString();
             sections.Add(new KeyValuePair<string, IDictionary<string, string>>("rows", rows));
 
+            var leaderboard = new Dictionary<string, string>
+            {
+                ["margin_x"] = LeaderboardMarginX.ToString("F0", CultureInfo.InvariantCulture),
+                ["offset_y"] = LeaderboardOffsetY.ToString("F0", CultureInfo.InvariantCulture),
+                ["font_size"] = LeaderboardFontSize.ToString(CultureInfo.InvariantCulture),
+                ["seat_a_color"] = GradientText.ToHex(LeaderboardSeatAColor),
+                ["seat_b_color"] = GradientText.ToHex(LeaderboardSeatBColor),
+            };
+            sections.Add(new KeyValuePair<string, IDictionary<string, string>>("leaderboard", leaderboard));
+
             for (int i = 0; i < CustomTexts.Count; i++)
             {
                 var ct = CustomTexts[i];
@@ -163,7 +202,7 @@ namespace TwilightTimer
             PersistenceService.Write(
                 PersistenceService.PathFor("layout.ini"),
                 sections,
-                "TwilightTimer HUD layout. Text is drawn directly on screen (no window).\n# [text] offset_x/offset_y (top-left px), font_size, color_a/color_b;\n# [rows] ordered row types; [custom.<n>] arbitrary on-screen texts (template vars).");
+                "TwilightTimer HUD layout. Text is drawn directly on screen (no window).\n# [text] offset_x/offset_y (top-left px), font_size, color_a/color_b;\n# [rows] ordered row types; [custom.<n>] arbitrary on-screen texts (template vars);\n# [leaderboard] in-match leaderboard: margin_x/offset_y (left-edge centre), font_size (0=follow [text]), seat_a_color/seat_b_color.");
         }
 
         // ── helpers ──
