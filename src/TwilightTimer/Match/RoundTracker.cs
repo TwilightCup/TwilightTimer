@@ -157,6 +157,19 @@ namespace TwilightTimer
             }
             else
             {
+                // SINGLE：本次尝试被放弃（lc skip / 未通关退出）——无论最终
+                // 判成跳过还是中途退出，该尝试都记 N/A、不产生成绩，其中
+                // 产生的可原谅标记（如 CheckpointSkip：回滚存档点后玩家没有
+                // 读档而是直接放弃了尝试）随尝试作废。横幅与标记在下一次
+                // 尝试开始前清干净；作废证据已在上报时刻（InvalidMarked）发给
+                // 服务端，清的是本地状态不是记录。MULTI 不清：整局是一个连续
+                // 单元，放弃关卡的标记须保留给裁判仲裁。
+                if (IsSingleProject)
+                {
+                    if (TimerCore.State != null)
+                        TimerCore.State.Flags.ClearForgivable();
+                    MatchCheckpointPenalty.OnAttemptAbandoned();
+                }
                 // SINGLE 最后一次尝试被跳过（如 lc skip 收尾）：尝试预算已用尽，
                 // 不可能有下一段开始来把 pending exit 转成 AttemptSkipped——
                 // 延迟判定在这里会永久悬死（既无 attempt_skip 也无完成信号）。

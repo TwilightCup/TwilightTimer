@@ -71,5 +71,14 @@ namespace TwilightTimer
 
         /// <summary>Round bookkeeping: reset the pending latch on a new round.</summary>
         public static void OnRoundStarted() => Pending = false;
+
+        /// <summary>
+        /// A SINGLE attempt was abandoned (lc skip / unpassed exit) with the
+        /// rollback still pending: the save-point load that would have cleared
+        /// it will never happen — the attempt is N/A and its penalty latch
+        /// dies with it. Called from <see cref="RoundTracker.OnSegmentEnd"/>;
+        /// the CheckpointSkip flag itself is cleared by the caller.
+        /// </summary>
+        public static void OnAttemptAbandoned() => Pending = false;
     }
 }
