@@ -243,20 +243,28 @@ namespace TwilightTimer
             bool retrying = State.Retrying;
             State.EndSegment(end, completed);
 
+            // Fire tag OnLevelExit FIRST — but only for a genuine level
+            // completion. A retry or a mid-level quit abandons the level (its
+            // reload/leave drives it through PlayingLevel → Inactive/LoadingLevel,
+            // a segment end); running OnLevelExit then would let the checkpoint
+            // final-check (R4.2) and voiceline-completion check fire against the
+            // abandoned state and spuriously raise INVALID_CHECKPOINT_FINAL /
+            // Voiceline.
+            //
+            // Ordering matters: exit-time marks (e.g. CheckpointFinal after a
+            // skip-rollback rewrote the checkpoint number) must be raised
+            // BEFORE the round tracker freezes the segment's validity verdict
+            // and clears SINGLE-attempt marks — otherwise they land after the
+            // clear and follow the player into the next attempt (and they
+            // belong in the completion-time upload evidence anyway).
+            if (!retrying && completed)
+                ForEachEnabledRule(rule => Safe(rule, r => r.OnLevelExit(MakeContext(game))));
+
             // T4.1/T4.4: report the segment outcome to the round tracker.
             // Only genuine outcomes count — a retry reload abandons its
             // segment without it being a skip or an exit.
             if (!retrying)
                 RoundTracker.OnSegmentEnd(roundIndex, Ms(end - segStart), Ms(end), completed);
-
-            // Fire tag OnLevelExit — but only for a genuine level completion. A
-            // retry or a mid-level quit abandons the level (its reload/leave
-            // drives it through PlayingLevel → Inactive/LoadingLevel, a segment
-            // end); running OnLevelExit then would let the checkpoint final-check
-            // (R4.2) and voiceline-completion check fire against the abandoned
-            // state and spuriously raise INVALID_CHECKPOINT_FINAL / Voiceline.
-            if (!retrying && completed)
-                ForEachEnabledRule(rule => Safe(rule, r => r.OnLevelExit(MakeContext(game))));
 
             // R1.6: record the completed run's total time. Three cases count as
             // "the run is over": (a) the campaign's final level was passed (the

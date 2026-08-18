@@ -195,8 +195,13 @@ namespace TwilightTimer
             var segments = RoundTracker.GetCompletedSegments();
             if (RoundTracker.IsSingleProject)
             {
+                // Only valid attempts count toward the score — an attempt
+                // completed under invalid marks is N/A for scoring (the
+                // invalid verdict is frozen on its segment record).
                 var durations = new List<long>(segments.Count);
-                foreach (var s in segments) durations.Add(s.DurationMs);
+                foreach (var s in segments)
+                    if (!s.IsInvalid)
+                        durations.Add(s.DurationMs);
                 row.SingleScoreMs = ComputeSingleScore(durations);
             }
             else

@@ -7,6 +7,8 @@ namespace TwilightTimer
     /// a level (MULTI) or an attempt (SINGLE).</summary>
     public sealed class RoundSegment
     {
+        internal static readonly string[] NoReasons = new string[0];
+
         /// <summary>Index within the round (MULTI: collection index; SINGLE: attempt index).</summary>
         public int Index;
         /// <summary>This segment's duration, game-time, milliseconds.</summary>
@@ -15,6 +17,18 @@ namespace TwilightTimer
         public long TotalMs;
         public bool Passed;
         public bool Skipped;
+
+        /// <summary>
+        /// Invalid reasons active at the moment this segment completed (empty
+        /// = valid). SINGLE: the attempt's validity verdict — a non-empty set
+        /// means the attempt's score must be treated as invalid (N/A for
+        /// scoring, evidence retained). MULTI: informational snapshot (the
+        /// round is one continuous unit; arbitration is the referee's).
+        /// </summary>
+        public string[] InvalidReasons = NoReasons;
+
+        /// <summary>True when invalid marks were active at completion.</summary>
+        public bool IsInvalid => InvalidReasons != null && InvalidReasons.Length > 0;
     }
 
     /// <summary>
@@ -46,7 +60,12 @@ namespace TwilightTimer
         /// <summary>Index the next started segment will receive.</summary>
         public static int NextSegmentIndex { get; private set; }
 
-        /// <summary>SINGLE: attempts with a recorded completion (T4.5).</summary>
+        /// <summary>
+        /// SINGLE: attempts with a recorded completion that was valid at the
+        /// moment of passing (T4.5). An attempt completed under invalid
+        /// marks still reports a SegmentCompleted (the server gets the time
+        /// + invalid evidence) but does not count as valid here.
+        /// </summary>
         public static int ValidAttemptCount { get; private set; }
 
         private static bool _pendingIncompleteExit;
@@ -125,6 +144,18 @@ namespace TwilightTimer
         public static void OnSegmentStart()
         {
             if (!RoundActive) return;
+            // SINGLE invariant: every attempt starts with a clean slate. The
+            // previous attempt's verdict was frozen at its OnSegmentEnd
+            // (including exit-handler marks); any forgivable residue dying to
+            // reach a clearing path is wiped here so a new attempt never
+            // inherits it. MULTI keeps marks across levels — the round is one
+            // continuous unit and arbitration is the referee's.
+            if (IsSingleProject)
+            {
+                if (TimerCore.State != null)
+                    TimerCore.State.Flags.ClearForgivable();
+                MatchCheckpointPenalty.OnAttemptAbandoned();
+            }
             if (_pendingIncompleteExit)
             {
                 TimerEvents.RaiseAttemptSkipped(_pendingExitIndex);
@@ -145,15 +176,34 @@ namespace TwilightTimer
             if (!RoundActive) return;
             if (passed)
             {
+                // Snapshot the invalid reasons active at completion: SINGLE
+                // attempts are scored independently, so an attempt completed
+                // under marks is invalid as a whole (the mark evidence was
+                // already reported live via InvalidMarked; this records the
+                // verdict on the score itself). MULTI keeps them as an
+                // informational snapshot.
+                string[] reasons = SnapshotInvalidReasons();
                 _segments.Add(new RoundSegment
                 {
                     Index = index,
                     DurationMs = durationMs,
                     TotalMs = totalMs,
                     Passed = true,
+                    InvalidReasons = reasons,
                 });
-                ValidAttemptCount++;
+                if (reasons.Length == 0)
+                    ValidAttemptCount++;
                 TimerEvents.RaiseSegmentCompleted(index, durationMs, totalMs);
+                // SINGLE: the attempt's verdict is final — a completed
+                // attempt never re-runs, so its marks die with it and the
+                // next attempt starts clean (a valid pass "forgives" the
+                // marks exactly like abandoning the attempt does).
+                if (IsSingleProject && reasons.Length > 0)
+                {
+                    if (TimerCore.State != null)
+                        TimerCore.State.Flags.ClearForgivable();
+                    MatchCheckpointPenalty.OnAttemptAbandoned();
+                }
             }
             else
             {
@@ -313,6 +363,22 @@ namespace TwilightTimer
             TimerEvents.RaiseIncompleteExit(_pendingExitIndex);
             _pendingIncompleteExit = false;
             _pendingExitIndex = -1;
+        }
+
+        /// <summary>
+        /// Copy of the currently-active invalid reasons as stable strings
+        /// (empty array when the run is clean). Used to freeze a segment's
+        /// validity verdict at completion time.
+        /// </summary>
+        private static string[] SnapshotInvalidReasons()
+        {
+            var s = TimerCore.State;
+            if (s == null) return RoundSegment.NoReasons;
+            var all = s.Flags.All;
+            var list = new List<string>();
+            foreach (var r in all)
+                list.Add(r.ToString());
+            return list.Count == 0 ? RoundSegment.NoReasons : list.ToArray();
         }
 
         internal static long Ms(double seconds) => (long)System.Math.Round(seconds * 1000d);
