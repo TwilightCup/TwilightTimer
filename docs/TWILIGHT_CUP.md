@@ -45,6 +45,9 @@ Entered/exited only via `TwilightTimerApi` (in production: TwilightCore's
 reset (manual-reset scope + all invalid marks) and applies the pushed tags;
 timing still starts at the first `PlayingLevel` edge. `StopRound()` stops
 timing; segment data stays queryable until the next `StartRound`.
+`RoundTracker.ResumeRound()` re-activates the same round after a reconnect
+without clearing segments, totals or the next-segment index; TwilightCore
+reaches it through the optional `IResumableTimerProvider` extension.
 
 Outbound events (`TimerEvents`, re-exposed by the ITimerProvider adapter): `SegmentCompleted(index, durationMs, totalMs)`,
 `AttemptSkipped(index)`, `RunCompleted(totalMs)`, `IncompleteExit(index)`,

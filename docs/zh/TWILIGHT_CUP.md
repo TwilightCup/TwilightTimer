@@ -35,7 +35,9 @@ Level Collections 引擎），并作为其计时引擎。所有比赛相关能�
 `TwilightTimerApi.StartRound(roundId, isSingle, retryCount, tags)` 执行完整重置
 （手动重置范围 + 全部无效标记）并应用推送标签；计时仍在首个
 `PlayingLevel` 边沿开始。`StopRound()` 停止计时；分段数据保留可查至下一次
-`StartRound`。
+`StartRound`。`RoundTracker.ResumeRound()` 在断线重连后重新激活同一回合，
+不清空已完成分段、累计时长与下一段序号；TwilightCore 经可选扩展接口
+`IResumableTimerProvider` 调用它。
 
 对外事件（`TimerEvents`，由 ITimerProvider 适配器转暴露）：
 `SegmentCompleted(index, durationMs, totalMs)`、`AttemptSkipped(index)`、

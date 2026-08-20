@@ -19,7 +19,7 @@ namespace TwilightTimer
     /// throw. Internal TimerEvents are re-exposed as the interface's events;
     /// the per-subscriber try/catch lives in TimerEvents (T4.7).
     /// </summary>
-    public sealed class TwilightTimerProvider : ITimerProvider
+    public sealed class TwilightTimerProvider : ITimerProvider, IResumableTimerProvider
     {
         public static TwilightTimerProvider Instance { get; private set; }
 
@@ -99,6 +99,14 @@ namespace TwilightTimer
 
         public void StopRound()
             => MainThreadQueue.Enqueue(RoundTracker.StopRound);
+
+        public void ResumeRound(string roundId, RoundPickInfo pick)
+            => MainThreadQueue.Enqueue(() =>
+                RoundTracker.ResumeRound(
+                    roundId,
+                    pick != null && pick.ProjectType == RoundProjectType.Single,
+                    pick != null ? pick.RetryCount : 0,
+                    pick != null ? pick.Tags : null));
 
         // ── T5: tag push ─────────────────────────────────────────────
 

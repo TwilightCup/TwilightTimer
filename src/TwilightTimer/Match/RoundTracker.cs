@@ -124,6 +124,39 @@ namespace TwilightTimer
         }
 
         /// <summary>
+        /// Re-activate the round after a reconnect WITHOUT a full reset:
+        /// completed segments, round id, valid-attempt count, next-segment
+        /// index and the engine's accumulated game time are all preserved.
+        /// Only valid for the same round id that was stopped; the tag set is
+        /// re-applied (match mode must already be active). If the engine still
+        /// considers the current level in-segment, timing resumes immediately.
+        /// </summary>
+        public static bool ResumeRound(string roundId, bool isSingleProject, int retryCount, IEnumerable<string> tags)
+        {
+            if (RoundActive) return false;
+            if (RoundId != roundId)
+            {
+                Plugin.Logger.LogWarning(
+                    $"TwilightTimer: ResumeRound ignored — round id mismatch ({RoundId ?? "<null>"} != {roundId}).");
+                return false;
+            }
+            if (TimerCore.State == null)
+            {
+                Plugin.Logger.LogWarning("TwilightTimer: ResumeRound ignored — engine not ready.");
+                return false;
+            }
+
+            RoundActive = true;
+            IsSingleProject = isSingleProject;
+            RetryCount = retryCount;
+            if (TimerCore.State.InSegment)
+                TimerCore.State.TimingActive = true;
+            SetRoundTags(tags);
+            Plugin.Logger.LogInfo($"TwilightTimer: round '{roundId}' resumed (data preserved, active={RoundActive}).");
+            return true;
+        }
+
+        /// <summary>
         /// LC RunAborted arrived mid-round: resolve a pending unpassed exit
         /// immediately (T4.4) rather than waiting for the StopRound that
         /// follows. Idempotent — a later StopRound will not double-fire.
