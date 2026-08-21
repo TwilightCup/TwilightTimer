@@ -70,7 +70,9 @@ the HUD tags line and the panel Category page.
 While a round is active: reset key and one-key retry (both the level reload
 and the collection restart) are log-only no-ops; auto-reset never clears
 round data; validity detection runs as usual and new marks are reported
-live.
+live. A pushed `Jumpless` tag also physically disables the jump key for the
+round — the input-layer enforcement (R3.5.3) follows the live tag set that
+`SetRoundTags` swaps in, and lifts automatically when the match ends.
 
 ## ITimerProvider adapter (T1)
 
