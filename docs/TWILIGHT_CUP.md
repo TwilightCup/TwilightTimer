@@ -30,10 +30,9 @@ Entered/exited only via `TwilightTimerApi` (in production: TwilightCore's
 
 - On enter: the user's enabled tag set is snapshotted; the panel title is
   badged ("Twilight Cup match #roundId"); conflicting settings become
-  view-only (tag checkboxes, pause-counting, auto-reset, reset/retry
-  keybinds).
-- Pause time always counts during a match (T7.3) — enforced at option-read
-  time, so `settings.ini` never stores a match-forced value.
+  view-only (tag checkboxes, auto-reset, reset/retry keybinds).
+- Pause time always counts (T7.3) — since the upstream timer now always
+  counts paused time globally, no match-only enforcement is needed.
 - On exit: the user's tag set is restored. Round data survives until the
   next `StartRound` (reconnection re-reporting).
 - `tags.ini` is never written with match tags: the save path swaps the user

@@ -9,10 +9,9 @@ namespace TwilightTimer
     /// or debug tooling otherwise) — the settings panel offers no switch.
     ///
     /// On enter, the user's enabled tag set is snapshotted and the pushed
-    /// round tags become the sole authority (T5.3). The T7.3 pause rule is
-    /// enforced at read time (TimingOptions.FromSettings forces
-    /// CountInPause) rather than by overwriting the user's settings field,
-    /// so settings.ini can never be persisted with a match-forced value.
+    /// round tags become the sole authority (T5.3). Pause time always counts
+    /// globally now (there is no pause-counting setting to force), so the
+    /// match only needs to guard the conflicting AutoReset / keybind settings.
     /// On exit, the snapshot is restored (T2.4/T2.6). Round data produced
     /// during the match is deliberately left alone here (T3.5: it stays
     /// queryable until the next StartRound).

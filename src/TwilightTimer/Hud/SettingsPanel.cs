@@ -181,14 +181,13 @@ namespace TwilightTimer
         {
             Section(loc.Get("PANEL_TIMING"));
             // T2.3: during a match the settings that conflict with the match
-            // rules (T5/T7) are view-only — CountInPause is forced on (T7.3),
-            // AutoReset is superseded by the round tracker (T7.2).
+            // rules (T5/T7) are view-only — AutoReset is superseded by the
+            // round tracker (T7.2). Pause always counts and menu/lobby never
+            // counts, so there are no pause/menu count toggles.
             bool locked = MatchMode.Active;
             GUI.enabled = !locked;
-            s.CountInPause = Toggle(loc.Get("SETTINGS_COUNT_IN_PAUSE"), s.CountInPause);
             s.AutoReset = Toggle(loc.Get("SETTINGS_AUTO_RESET"), s.AutoReset);
             GUI.enabled = true;
-            s.CountInMenu = Toggle(loc.Get("SETTINGS_COUNT_IN_MENU"), s.CountInMenu);
             s.RestartClearsForgivable = Toggle(loc.Get("SETTINGS_RESTART_CLEARS_FORGIVABLE"), s.RestartClearsForgivable);
             // Free-form input (clamped ≥0 on apply); the slider's 5s cap was
             // artificial — RetryAction only needs Mathf.Max(0, dwell).
@@ -223,6 +222,7 @@ namespace TwilightTimer
             Section(loc.Get("PANEL_HUD"));
             cfg.Settings.ShowHud = Toggle(loc.Get("SETTINGS_SHOW_HUD"), cfg.Settings.ShowHud);
             cfg.Settings.ShowLeaderboard = Toggle(loc.Get("SETTINGS_SHOW_LEADERBOARD"), cfg.Settings.ShowLeaderboard);
+            cfg.Settings.CenterLoadingSaving = Toggle(loc.Get("SETTINGS_CENTER_LOADING_SAVING"), cfg.Settings.CenterLoadingSaving);
             cfg.Layout.OffsetX = FloatFieldRow(loc.Get("PANEL_OFFSET_X"), cfg.Layout.OffsetX);
             cfg.Layout.OffsetY = FloatFieldRow(loc.Get("PANEL_OFFSET_Y"), cfg.Layout.OffsetY);
             cfg.Layout.FontSize = Mathf.RoundToInt(SliderRow(loc.Get("PANEL_FONT_SIZE"), cfg.Layout.FontSize, 8, 72));

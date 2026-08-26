@@ -93,6 +93,7 @@ namespace TwilightTimer
             var hudGo = new GameObject("TwilightTimer.Hud");
             Object.DontDestroyOnLoad(hudGo);
             hudGo.AddComponent<TimerHud>();
+            hudGo.AddComponent<ProgressIndicatorMover>();
 
             var lbGo = new GameObject("TwilightTimer.LeaderboardHud");
             Object.DontDestroyOnLoad(lbGo);
