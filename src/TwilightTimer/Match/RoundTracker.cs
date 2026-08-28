@@ -343,6 +343,10 @@ namespace TwilightTimer
         public static long RoundTotalMs
             => TimerCore.State != null ? Ms(TimerCore.State.GameTime) : 0;
 
+        /// <summary>Wall-clock (Real Time) ms accumulated this round.</summary>
+        public static long RoundRealTimeMs
+            => TimerCore.State != null ? Ms(TimerCore.State.RealTime) : 0;
+
         /// <summary>Snapshot copy of the completed segments so far.</summary>
         public static List<RoundSegment> GetCompletedSegments()
         {

@@ -65,7 +65,9 @@ HUD 标签行与面板类别页。
 `TwilightCore.Timer.ITimerProvider`，并在插件加载时向
 `TimerProviderRegistry` 自注册（卸载时注销）。变更调用经
 `MainThreadQueue` 编组（WebSocket 线程安全）；查询为时点快照；内部
-`TimerEvents` 转暴露为接口事件（逐订阅者 try/catch）。游戏内
+`TimerEvents` 转暴露为接口事件（逐订阅者 try/catch）。同时实现可选扩展
+`IRealtimeTimerProvider`，因此 TwilightCore 的 `live_time` 流会携带
+Real Time 现实/墙钟值 `real_time_ms`。游戏内
 `twi sim status` 会打印已注册提供方的实时状态。
 
 ## 对局排行榜

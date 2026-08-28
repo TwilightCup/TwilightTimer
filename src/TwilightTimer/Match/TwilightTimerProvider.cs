@@ -10,7 +10,8 @@ namespace TwilightTimer
     /// (MatchMode / RoundTracker / TimerEvents) and is registered with
     /// <see cref="TimerProviderRegistry"/> from Plugin.Awake — the dependency
     /// stays one-way (TwilightTimer → TwilightCore), TwilightCore only ever sees
-    /// the interface.
+    /// the interface. Also implements <see cref="IRealtimeTimerProvider"/> so
+    /// the live_time stream can carry the Real Time wall-clock value.
     ///
     /// Mutating calls may arrive from TwilightCore's WebSocket callback
     /// thread (per contract we must not assume main-thread dispatch), so they
@@ -19,7 +20,7 @@ namespace TwilightTimer
     /// throw. Internal TimerEvents are re-exposed as the interface's events;
     /// the per-subscriber try/catch lives in TimerEvents (T4.7).
     /// </summary>
-    public sealed class TwilightTimerProvider : ITimerProvider, IResumableTimerProvider
+    public sealed class TwilightTimerProvider : ITimerProvider, IResumableTimerProvider, IRealtimeTimerProvider
     {
         public static TwilightTimerProvider Instance { get; private set; }
 
@@ -120,6 +121,8 @@ namespace TwilightTimer
         public long CurrentSegmentMs => RoundTracker.CurrentSegmentMs;
 
         public long RoundTotalMs => RoundTracker.RoundTotalMs;
+
+        public long RealTimeMs => RoundTracker.RoundRealTimeMs;
 
         public int ValidAttemptCount => RoundTracker.ValidAttemptCount;
 

@@ -80,8 +80,11 @@ round — the input-layer enforcement (R3.5.3) follows the live tag set that
 `TimerProviderRegistry` at plugin load (unregisters on destroy). Mutating
 calls are marshaled through `MainThreadQueue` (WebSocket-thread safe);
 queries are point-in-time snapshots; the internal `TimerEvents` are
-re-exposed as the interface's events (per-subscriber try/catch). In-game,
-`twi sim status` prints the registered provider's live state.
+re-exposed as the interface's events (per-subscriber try/catch). It also
+implements the optional `IRealtimeTimerProvider`, so TwilightCore's
+`live_time` stream carries the Real Time wall-clock value as
+`real_time_ms`. In-game, `twi sim status` prints the registered provider's
+live state.
 
 ## In-match leaderboard
 
