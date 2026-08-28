@@ -20,6 +20,7 @@ restart_clears_forgivable = false
 retry_min_dwell = 0.5
 show_hud = true
 show_leaderboard = true
+show_real_time = true
 center_loading_saving = false
 language = en
 category = any
@@ -36,6 +37,7 @@ leaderboard_key = Tab
 | `retry_min_dwell` | seconds (≥0) | 0.5 | R6 — minimum time held in the empty scene on retry, measured from the key press. If the level reloads faster, the empty scene is held until this elapses; `0` disables the hold. |
 | `show_hud` | true/false | true | R2.5.1 |
 | `show_leaderboard` | true/false | true | in-match leaderboard HUD (still gated by `show_hud`; see [HUD.md](HUD.md)) |
+| `show_real_time` | true/false | true | R2.5.3 — show the always-active Real Time clock in the HUD (default shown below Game Time; can still be hidden) |
 | `center_loading_saving` | true/false | false | Move the game's own top-right "Loading"/"Saving" progress indicator to the top-center of the screen |
 | `language` | BCP-47 code | en | matches a `lang/<code>.txt` |
 | `category` | category id | any | R3.1 |
@@ -116,10 +118,11 @@ seat_b_color = FF5A5AFF
   `font_size` is the font size; `color_a`/`color_b` are the default two-color
   gradient (hex, see [HUD.md](HUD.md)).
 - `[rows]` — ordered rows; keys are 0-based indices. Row types: `GameTime`,
-  `CurrentSegment`, `LastSegment`, `LastRun`, `CurrentState`.
+  `RealTime`, `CurrentSegment`, `LastSegment`, `LastRun`, `CurrentState`.
+  `RealTime` is also gated by the `show_real_time` setting (default on).
 - `[custom.<n>]` — arbitrary on-screen texts at `(x, y)` with their own gradient.
   Template variables: `{date}`, `{time}`, `{version}`, `{collection}`,
-  `{category}`, `{gametime}`.
+  `{category}`, `{gametime}`, `{realtime}`.
 - `[leaderboard]` — the in-match leaderboard (left-edge-centre anchor; see
   [HUD.md](HUD.md)): `margin_x` (px from the left edge), `offset_y` (nudge
   from vertical centre), `font_size` (`0` = follow `[text] font_size`),
