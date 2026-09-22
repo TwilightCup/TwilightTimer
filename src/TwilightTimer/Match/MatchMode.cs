@@ -12,6 +12,8 @@ namespace TwilightTimer
     /// round tags become the sole authority (T5.3). Pause time always counts
     /// globally now (there is no pause-counting setting to force), so the
     /// match only needs to guard the conflicting AutoReset / keybind settings.
+    /// The local subsegment module (R8) is disabled for the whole session
+    /// (T7.5) without touching the user's setting.
     /// On exit, the snapshot is restored (T2.4/T2.6). Round data produced
     /// during the match is deliberately left alone here (T3.5: it stays
     /// queryable until the next StartRound).
@@ -41,6 +43,11 @@ namespace TwilightTimer
             _savedTags.AddRange(cfg.EnabledTags.Tags);
             Active = true;
             TimerCore.Instance?.RefreshOptions();
+            // T7.5: the local subsegment module (R8) is disabled for the whole
+            // match session — the match ranks players head to head, so a local
+            // PB/ghost comparison must not run. The setting itself is untouched
+            // and the feature comes back when the match ends.
+            SubsegmentManager.Instance?.OnMatchModeEnter();
             Plugin.Logger.LogInfo("TwilightTimer: match mode entered (tags snapshotted).");
         }
 
@@ -60,6 +67,9 @@ namespace TwilightTimer
             _savedTags.Clear();
             Active = false;
             TimerCore.Instance?.RefreshOptions();
+            // T7.5: re-arm the local subsegment module. It does not resume
+            // mid-level; the next level start reloads references and sampling.
+            SubsegmentManager.Instance?.OnMatchModeExit();
             Plugin.Logger.LogInfo("TwilightTimer: match mode exited (user tags restored).");
         }
 

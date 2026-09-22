@@ -59,6 +59,14 @@ HUD 标签行与面板类别页。
 `Jumpless` 标签同样会在输入层强制禁用跳跃键——强制（R3.5.3）跟随
 `SetRoundTags` 换入的实时标签集，比赛结束自动解除。
 
+**T7.5 —— 比赛期间禁用本地分段对比。** R8 subsegment 模块（采样、参考加载、
+实时对比、PB 写入及其排行榜 HUD）在整个比赛对局内被强制关闭，而不只是回合
+进行中，因此本地 PB / 影子对比绝不会在比赛中运行。用户设置
+`Subsegment.Enable` 不会被修改：抑制是叠加在其上的运行时开关，比赛期间
+分段对比设置页为只读。`MatchMode.Enter`/`Exit` 会清空模块运行时状态；任何
+时刻被抑制过的关卡都不再具备记录资格（避免残缺轨迹写入 PB），比赛结束后
+从下一个关卡开始正常记录。
+
 ## ITimerProvider 适配器（T1）
 
 `Match/TwilightTimerProvider.cs` 实现 TwilightCore 已发布的

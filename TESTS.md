@@ -190,6 +190,29 @@ twitimer sub clear
 leaderboard entry count. `twitimer sub entries` lists each loaded reference and its
 latest settled diff.
 
+`twitimer sub status` also reports the match gate:
+`enable=<user setting> matchSuppressed=<bool> effective=<bool>
+samplingAllowedForLevel=<bool>`. The `effective` value is what the module
+actually obeys.
+
+**Match suppression (T7.5 / R8.9).** While a match is active the local subsegment
+is disabled automatically:
+
+```text
+twitimer set subsegment_enable true
+twitimer match enter
+twitimer sub status              # enable=true matchSuppressed=true effective=false
+twitimer sub entries             # no entries; HUD subsegment rows disappear
+twitimer match exit
+twitimer sub status              # enable=true matchSuppressed=false; recording resumes at the next level
+```
+
+Use `twitimer match enter` / `twitimer match exit` to toggle the state without a
+real match. Enter a level with reference data present (see section 7) first: the
+subsegment leaderboard shows before `match enter`, disappears on enter, and comes
+back after exiting the match and starting the next level. No PB file may be
+written for a level that was suppressed at any point.
+
 ### 8. Markers (R10)
 
 Enter a level, then:
@@ -332,6 +355,7 @@ twitimer sim events off
 - [ ] `twitimer layout row add/remove` changes the HUD rows.
 - [ ] `twitimer preset create/save/apply` round-trips layout + markers.
 - [ ] `twitimer sub status/entries` works with subsegment data present.
+- [ ] `twitimer match enter` disables subsegment (`matchSuppressed=true`, `effective=false`) and hides its leaderboard; `twitimer match exit` restores the setting.
 - [ ] `twitimer marker add/list/toggle/pb` works while in a level.
 - [ ] `twitimer flags raise/clear` shows the expected HUD banner / soft-flag line.
 - [ ] `twitimer lc status` reports correctly with LevelCollections installed or absent.

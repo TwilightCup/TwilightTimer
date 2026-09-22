@@ -169,6 +169,25 @@ twitimer sub clear
 `twitimer sub status` 打印启用标志、路径、多局状态与当前排行榜条目数。
 `twitimer sub entries` 列出每个已加载参考及其最新结算的差值。
 
+`twitimer sub status` 同时报告比赛门控:
+`enable=<用户设置> matchSuppressed=<bool> effective=<bool>
+samplingAllowedForLevel=<bool>`。模块实际遵循的是 `effective`。
+
+**比赛抑制(T7.5 / R8.9)。** 比赛激活期间本地分段对比会自动禁用:
+
+```text
+twitimer set subsegment_enable true
+twitimer match enter
+twitimer sub status              # enable=true matchSuppressed=true effective=false
+twitimer sub entries             # 无条目; HUD 分段行消失
+twitimer match exit
+twitimer sub status              # enable=true matchSuppressed=false; 从下一关恢复记录
+```
+
+用 `twitimer match enter` / `twitimer match exit` 即可在不进行真实比赛的情况下切换
+该状态。先进入一个带有参考数据的关卡(见本节):分段排行榜在 `match enter` 前显示、
+进入后消失,退出比赛并开始下一关后恢复。任何时刻被抑制过的关卡都不得写入 PB。
+
 ### 8. 标记(R10)
 
 进入关卡后:
@@ -302,6 +321,7 @@ twitimer sim events off
 - [ ] `twitimer layout row add/remove` 改变 HUD 行。
 - [ ] `twitimer preset create/save/apply` 完整往返布局 + 标记。
 - [ ] 有分段数据时 `twitimer sub status/entries` 正常。
+- [ ] `twitimer match enter` 会禁用分段对比(`matchSuppressed=true`、`effective=false`)并隐藏其排行榜;`twitimer match exit` 恢复设置。
 - [ ] 关卡内 `twitimer marker add/list/toggle/pb` 正常。
 - [ ] `twitimer flags raise/clear` 显示预期的 HUD 横幅 / 软标记行。
 - [ ] 安装或不安装 LevelCollections 时 `twitimer lc status` 均正确报告。

@@ -147,7 +147,10 @@ namespace TwilightTimer
         private void DrawSubsegment(ConfigService cfg)
         {
             var mgr = SubsegmentManager.Instance;
-            if (mgr == null || !cfg.Settings.SubsegmentEnable) return;
+            // T7.5: the local subsegment leaderboard is suppressed for the whole
+            // match session (Enabled folds in MatchMode.Active); the shared HUD
+            // stays usable in Markers mode.
+            if (mgr == null || !mgr.Enabled) return;
             var state = TimerCore.State;
             if (state == null) return;
             // During a level transition (LoadingLevel between levels) keep the

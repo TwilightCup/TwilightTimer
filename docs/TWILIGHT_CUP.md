@@ -73,6 +73,17 @@ live. A pushed `Jumpless` tag also physically disables the jump key for the
 round — the input-layer enforcement (R3.5.3) follows the live tag set that
 `SetRoundTags` swaps in, and lifts automatically when the match ends.
 
+**T7.5 — local subsegment is disabled for the match.** The R8 subsegment
+module (sampling, reference loading, live diffing, PB writes and its
+leaderboard HUD) is forced off for the whole match session, not just while a
+round is in flight, so a local PB/ghost comparison can never run during
+competition. The user's `Subsegment.Enable` setting is never modified: the
+suppression is a runtime gate on top of it, and the Subsegment settings page
+is view-only while the match lasts. `MatchMode.Enter`/`Exit` clear the
+module's runtime state, and a level that was suppressed at any point is
+ineligible for recording (no partial-trajectory PB); recording resumes
+normally at the next level start after the match ends.
+
 ## ITimerProvider adapter (T1)
 
 `Match/TwilightTimerProvider.cs` implements TwilightCore's published

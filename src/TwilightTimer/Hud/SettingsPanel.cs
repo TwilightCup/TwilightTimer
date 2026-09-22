@@ -349,6 +349,10 @@ namespace TwilightTimer
         private void DrawSubsegment(ConfigService cfg, SettingsModel s, LocalizationService loc)
         {
             Section(loc.Get("PANEL_SUBSEGMENT"));
+            // T7.5: the local subsegment module is force-disabled for the whole
+            // match session, so its page is view-only for the duration.
+            bool locked = MatchMode.Active;
+            GUI.enabled = !locked;
             s.SubsegmentEnable = Toggle(loc.Get("SETTINGS_SUBSEGMENT_ENABLE"), s.SubsegmentEnable);
             s.SubsegmentDebugLogging = Toggle(loc.Get("SETTINGS_SUBSEGMENT_DEBUG_LOGGING"), s.SubsegmentDebugLogging);
 
@@ -371,6 +375,9 @@ namespace TwilightTimer
             s.SubsegmentRespawnJumpMeters = Mathf.Max(0f, FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_RESPAWN_JUMP_METERS"), s.SubsegmentRespawnJumpMeters, "0.###"));
             s.SubsegmentMaxSamplesPerLevel = Mathf.Max(1, Mathf.RoundToInt(FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_MAX_SAMPLES_PER_LEVEL"), s.SubsegmentMaxSamplesPerLevel, "F0")));
             s.SubsegmentMaxLeaderboardEntries = Mathf.Max(1, Mathf.RoundToInt(FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_MAX_LEADERBOARD_ENTRIES"), s.SubsegmentMaxLeaderboardEntries, "F0")));
+            GUI.enabled = true;
+            if (locked)
+                GUILayout.Label(loc.Get("PANEL_MATCH_SUBSEGMENT_LOCKED"), _small);
         }
 
         // ── Page: Leaderboard (R8.5 HUD appearance + entry state colors + content mode) ──

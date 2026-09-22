@@ -144,6 +144,7 @@ TEMPLATE_NO_TAGS:(no tags)
 # ===== Twilight Cup match mode (TwilightTimer branch) =====
 PANEL_MATCH_BADGE:Twilight Cup match
 PANEL_MATCH_TAGS_LOCKED:Tags are set by the match pick and cannot be edited during a match.
+PANEL_MATCH_SUBSEGMENT_LOCKED:Subsegment is disabled during a match and cannot be changed here.
 NOTIFY_RESET_DISABLED_MATCH:Reset key disabled during a match round.
 NOTIFY_RETRY_DISABLED_MATCH:Retry key disabled during a match round.
 

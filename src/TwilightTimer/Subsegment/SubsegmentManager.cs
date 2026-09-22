@@ -91,6 +91,14 @@ namespace TwilightTimer
         // samples are discarded so the level cannot contribute a PB.
         private bool _samplingCapped;
 
+        // True only when the CURRENT level was allowed to record. It is
+        // decided once in OnLevelStart from the effective enabled state. If a
+        // match suppresses the module (or starts) at any point during the
+        // level, sampling stays off for the rest of that level: resuming
+        // mid-level would record a trajectory with a hole (and could write a
+        // bogus PB), so recording only ever restarts at the next level start.
+        private bool _samplingAllowedForLevel;
+
         // Loader/comparator state. During a level transition we keep the
         // previous level's visible leaderboard in _displayReferences until the
         // new level settles its first subsegment diff; _references always holds
@@ -173,7 +181,7 @@ namespace TwilightTimer
             get
             {
                 var source = _displayReferences ?? _references;
-                if (!_options.Enable || source.Count == 0) return new List<SubsegmentReference>();
+                if (!Enabled || source.Count == 0) return new List<SubsegmentReference>();
                 var visible = source.Where(r => _options.IsReferenceEnabled(r.DisplayId)).ToList();
                 var with = visible.Where(r => r.DiffMs.HasValue)
                     .OrderByDescending(r => r.DiffMs.Value)
@@ -186,11 +194,62 @@ namespace TwilightTimer
 
         public SubsegmentOptions Options => _options;
 
+        /// <summary>
+        /// True while a Twilight Cup match session forces the module off (T7.5).
+        /// The user's <c>Subsegment.Enable</c> setting is never modified, so the
+        /// feature comes back by itself once the match ends.
+        /// </summary>
+        public bool MatchSuppressed => MatchMode.Active;
+
+        /// <summary>
+        /// The effective enabled state: the user's setting AND not suppressed by
+        /// an active match. Every internal gate uses this, so a match disables
+        /// sampling, reference loading, diffing, PB writes and the leaderboard
+        /// in one place.
+        /// </summary>
+        public bool Enabled => _options.Enable && !MatchMode.Active;
+
+        /// <summary>
+        /// Whether the current level is allowed to record. False when the level
+        /// started while suppressed by a match, even if the match has since
+        /// ended — recording resumes at the next level start (T7.5).
+        /// </summary>
+        public bool SamplingAllowedForLevel => _samplingAllowedForLevel;
+
+        /// <summary>
+        /// Called by <see cref="MatchMode.Enter"/>: drop any level-local runtime
+        /// and mark the current level ineligible so a match cannot leave a
+        /// partial trajectory behind.
+        /// </summary>
+        public void OnMatchModeEnter()
+        {
+            _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
+            _samplingAllowedForLevel = false;
+            ClearRuntime();
+            Plugin.Logger.LogInfo("TwilightTimer: subsegment disabled for the match (local comparison is off until the match ends).");
+        }
+
+        /// <summary>
+        /// Called by <see cref="MatchMode.Exit"/>: drop runtime state. Recording
+        /// does not resume mid-level — the next level start re-enables it.
+        /// </summary>
+        public void OnMatchModeExit()
+        {
+            _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
+            _samplingAllowedForLevel = false;
+            ClearRuntime();
+            Plugin.Logger.LogInfo("TwilightTimer: match ended; subsegment resumes at the next level.");
+        }
+
         /// <summary>Called by the engine when a new segment (level) starts.</summary>
         public void OnLevelStart(Game game, RunState state)
         {
             _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
-            if (!_options.Enable)
+            // Decide recording eligibility for this whole level once. A match
+            // active at level start (or later) keeps this level out of the
+            // record entirely (T7.5).
+            _samplingAllowedForLevel = Enabled;
+            if (!Enabled)
             {
                 ClearRuntime();
                 return;
@@ -282,7 +341,9 @@ namespace TwilightTimer
         public void OnLevelEnd(Game game, RunState state, double endTime, bool completed, bool retrying, GameState nowGameState, AppSate nowAppState)
         {
             UpdateOptions();
-            if (!_options.Enable)
+            // No PB may be written for a level that was suppressed by a match
+            // (T7.5), even if the match ended before the level did.
+            if (!Enabled || !_samplingAllowedForLevel)
             {
                 ClearRuntime();
                 return;
@@ -395,7 +456,7 @@ namespace TwilightTimer
         public void OnRunExit()
         {
             UpdateOptions();
-            if (!_options.Enable)
+            if (!Enabled || !_samplingAllowedForLevel)
             {
                 ClearRuntime();
                 return;
@@ -422,7 +483,7 @@ namespace TwilightTimer
         public void OnPhysicsTick(Game game, GameState gState, RunState state)
         {
             UpdateOptions();
-            if (!_options.Enable || !state.InSegment || gState != GameState.PlayingLevel)
+            if (!Enabled || !_samplingAllowedForLevel || !state.InSegment || gState != GameState.PlayingLevel)
                 return;
 
             var pos = GetCurrentPosition();
@@ -463,7 +524,7 @@ namespace TwilightTimer
         public void OnUpdate()
         {
             UpdateOptions();
-            if (!_options.Enable)
+            if (!Enabled)
                 return;
 
             float now = Time.unscaledTime;

@@ -195,7 +195,7 @@ namespace TwilightTimer
             sb.AppendLine();
 
             var sub = SubsegmentManager.Instance;
-            sb.AppendLine($"subsegment={(sub != null && s.SubsegmentEnable ? "on" : "off")} entries={(sub != null ? sub.Entries.Count : 0)} title=\"{sub?.LeaderboardTitle}\" multiRun={sub != null && sub.InMultiRunActive} preserved={sub != null && sub.InPreservedTransition}");
+            sb.AppendLine($"subsegment={(sub != null && sub.Enabled ? "on" : "off")} matchSuppressed={sub != null && sub.MatchSuppressed} set={s.SubsegmentEnable} entries={(sub != null ? sub.Entries.Count : 0)} title=\"{sub?.LeaderboardTitle}\" multiRun={sub != null && sub.InMultiRunActive} preserved={sub != null && sub.InPreservedTransition}");
 
             var markers = MarkersManager.Instance;
             int markerCount = markers?.CurrentSet != null ? markers.CurrentSet.markers.Count : 0;
@@ -908,10 +908,13 @@ namespace TwilightTimer
                 case "status":
                     var opts = sub.Options;
                     var sb = new StringBuilder();
-                    sb.AppendLine($"enable={opts.Enable} multiRun={sub.InMultiRunActive} preserved={sub.InPreservedTransition}");
+                    sb.AppendLine($"enable={opts.Enable} matchSuppressed={sub.MatchSuppressed} effective={sub.Enabled} samplingAllowedForLevel={sub.SamplingAllowedForLevel}");
+                    sb.AppendLine($"multiRun={sub.InMultiRunActive} preserved={sub.InPreservedTransition}");
                     sb.AppendLine($"title=\"{sub.LeaderboardTitle}\" entries={sub.Entries.Count}");
                     sb.AppendLine($"pbPath={opts.PBPath} loadPath={opts.LoadPath} multiProject={opts.MultiProject}");
                     sb.AppendLine($"samplesPerLevelCap={opts.MaxSamplesPerLevel} quietSettle={opts.QuietSettleSeconds} debug={opts.DebugLogging}");
+                    if (sub.MatchSuppressed)
+                        sb.AppendLine("note: a match is active — subsegment is disabled until the match ends (T7.5).");
                     Print(sb.ToString());
                     break;
                 case "entries":

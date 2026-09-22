@@ -144,6 +144,7 @@ TEMPLATE_NO_TAGS:(无标签)
 # ===== 黄昏杯比赛模式（TwilightTimer 分支）=====
 PANEL_MATCH_BADGE:黄昏杯比赛
 PANEL_MATCH_TAGS_LOCKED:比赛期间标签由选图下发，不可编辑。
+PANEL_MATCH_SUBSEGMENT_LOCKED:比赛期间本地分段对比已禁用，此处不可修改。
 NOTIFY_RESET_DISABLED_MATCH:比赛回合中重置键已禁用。
 NOTIFY_RETRY_DISABLED_MATCH:比赛回合中一键重试已禁用。
 
