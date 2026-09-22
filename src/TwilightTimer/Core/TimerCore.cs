@@ -528,6 +528,17 @@ namespace TwilightTimer
             if (SettingsPanel.Instance != null && SettingsPanel.Instance.IsVisible)
                 return;
 
+            // While any keyboard-capturing UI is open (chat, text input, dialog,
+            // and the in-game dev console), suppress gameplay keybinds. Without
+            // this, typing an 'r' inside 'twitimer status' can trigger a retry,
+            // and Backspace can silently full-reset a run while fixing a typo
+            // (same guard as RetryAction R6.1.2a). This runs before the T7.4
+            // match guard below so that typing in the console/chat during a
+            // round stays completely silent instead of logging a disabled-key
+            // notice for every keystroke.
+            if (MenuSystem.keyboardState != KeyboardState.None)
+                return;
+
             // T7.4/T7.1: during a match round the reset and retry keys are
             // disabled — round data must be reported complete, and restarting
             // the collection (or reloading the level) would violate the match
@@ -540,14 +551,6 @@ namespace TwilightTimer
                     Notify("NOTIFY_RETRY_DISABLED_MATCH");
                 return;
             }
-
-            // While any other keyboard-capturing UI is open (chat, text input,
-            // dialog, and the in-game dev console), suppress gameplay keybinds
-            // too. Without this, typing an 'r' inside 'twitimer status' can trigger a
-            // retry, and Backspace can silently full-reset a run while fixing a
-            // typo (same guard as RetryAction R6.1.2a).
-            if (MenuSystem.keyboardState != KeyboardState.None)
-                return;
 
             if (LeaderboardHud.Instance != null && InputUtil.GetKeyDown(s.SubsegmentToggleKey))
                 LeaderboardHud.Instance.CycleMode();
