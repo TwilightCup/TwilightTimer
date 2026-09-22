@@ -552,7 +552,11 @@ namespace TwilightTimer
                 return;
             }
 
-            if (LeaderboardHud.Instance != null && InputUtil.GetKeyDown(s.SubsegmentToggleKey))
+            // T7.6: during the whole match session the shared leaderboard
+            // follows the match leaderboard's visibility, so its cycle key is
+            // disabled (a no-op while round data is protected is not enough —
+            // the key must not flip the display at any point of the match).
+            if (!MatchMode.Active && LeaderboardHud.Instance != null && InputUtil.GetKeyDown(s.SubsegmentToggleKey))
                 LeaderboardHud.Instance.CycleMode();
 
             if (InputUtil.GetKeyDown(s.ResetKey))

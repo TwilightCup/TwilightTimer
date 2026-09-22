@@ -342,6 +342,45 @@ twitimer sim events off
 - `twitimer sim start/resume/stop/tags` call the interface methods; `twitimer sim drain`
   runs the queued main-thread actions immediately.
 
+### 15. Shared leaderboard under the match leaderboard (T7.6)
+
+During a match session the shared leaderboard (subsegment/markers HUD) must be
+shown only while the match leaderboard is shown, hang directly below it, and
+ignore its own cycle key. `twitimer leaderboard status` reports the resolved
+state (`matchMode`, `matchLeaderboard`, `follow`, `anchoredBelowMatch`,
+`matchBottomY`, `topY`).
+
+```text
+twitimer match enter
+twitimer match start t76 multi 3 Checkpoint
+twitimer leaderboard mode Markers
+level 7 0
+twitimer marker add range t76
+twitimer marker feed
+twitimer leaderboard status
+twitimer hud off
+twitimer leaderboard status
+twitimer hud on
+twitimer set show_leaderboard false
+twitimer leaderboard status
+twitimer set show_leaderboard true
+twitimer match stop
+twitimer match exit
+```
+
+- With the round active and the HUD on, `twitimer leaderboard status` must show
+  `matchLeaderboard = shown, follow = shown, anchoredBelowMatch = true`, and
+  `topY = matchBottomY + 6`.
+- `twitimer hud off` or `twitimer set show_leaderboard false` must report
+  `matchLeaderboard = hidden, follow = hidden` — the shared leaderboard hides
+  with the match leaderboard (the `level`/`marker` rows are only needed to give
+  the markers HUD something to draw).
+- The mode-cycle key (`Subsegment.ToggleKey`, default `Tab`) must not cycle the
+  shared leaderboard while match mode is active, including between rounds
+  (`MATCH_STOPPED` with the match still active).
+- Outside a match, `twitimer leaderboard cycle/show/hide/mode` and the cycle key
+  behave exactly as before (standalone center anchor).
+
 ## Test checklist
 
 - [ ] `twitimer` prints the command summary.
@@ -360,6 +399,7 @@ twitimer sim events off
 - [ ] `twitimer flags raise/clear` shows the expected HUD banner / soft-flag line.
 - [ ] `twitimer lc status` reports correctly with LevelCollections installed or absent.
 - [ ] `twitimer match enter/start/tags/stop/exit` drives a round and restores the user's tags.
+- [ ] While match mode is active, the shared leaderboard hangs below the match leaderboard and follows its `show_hud`/`show_leaderboard` visibility; its cycle key does nothing (T7.6).
 - [ ] `twitimer match segments` retains completed round data after `twitimer match stop`.
 - [ ] `twitimer sim status` reports the registered provider and its live queries.
 - [ ] `twitimer sim events on` logs the expected T4 outbound event sequence.

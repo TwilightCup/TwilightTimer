@@ -40,7 +40,8 @@ TwilightTimer saves.
   deleted. See [CONFIG.md](CONFIG.md).
 - **Keybinds** — reset / retry / settings / leaderboard mode-cycle keys. The
   leaderboard mode-cycle key cycles the shared leaderboard HUD through hidden →
-  Subsegment → Markers → hidden. To rebind: click the field, then press the
+  Subsegment → Markers → hidden (disabled for the whole match session, T7.6).
+  To rebind: click the field, then press the
   desired key. Pure modifier presses are ignored. Mouse side buttons
   (`Mouse3`–`Mouse6`) can also be bound; mouse left/right buttons remain
   reserved for normal UI use.

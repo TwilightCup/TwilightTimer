@@ -308,6 +308,41 @@ twitimer sim events off
 - `twitimer sim start/resume/stop/tags` 调用接口方法;`twitimer sim drain` 立即执行排队中的
   主线程动作。
 
+### 15. 共享排行榜挂在比赛排行榜下方（T7.6）
+
+比赛对局期间,共享排行榜(subsegment/markers HUD)必须仅在对局排行榜显示时显示、直接挂在
+其下方,并忽略自身的切换键。`twitimer leaderboard status` 会报告解析后的状态
+(`matchMode`、`matchLeaderboard`、`follow`、`anchoredBelowMatch`、`matchBottomY`、`topY`)。
+
+```text
+twitimer match enter
+twitimer match start t76 multi 3 Checkpoint
+twitimer leaderboard mode Markers
+level 7 0
+twitimer marker add range t76
+twitimer marker feed
+twitimer leaderboard status
+twitimer hud off
+twitimer leaderboard status
+twitimer hud on
+twitimer set show_leaderboard false
+twitimer leaderboard status
+twitimer set show_leaderboard true
+twitimer match stop
+twitimer match exit
+```
+
+- 回合进行中且 HUD 开启时,`twitimer leaderboard status` 必须显示
+  `matchLeaderboard = shown, follow = shown, anchoredBelowMatch = true`,且
+  `topY = matchBottomY + 6`。
+- `twitimer hud off` 或 `twitimer set show_leaderboard false` 必须报告
+  `matchLeaderboard = hidden, follow = hidden` —— 共享排行榜随对局排行榜一起隐藏
+  (`level`/`marker` 步骤只是为了让 markers HUD 有内容可画)。
+- 比赛激活期间(包括回合之间,即 `MATCH_STOPPED` 但 match 仍激活)切换键
+  (`Subsegment.ToggleKey`,默认 `Tab`)不得循环共享排行榜。
+- 比赛之外,`twitimer leaderboard cycle/show/hide/mode` 与切换键行为完全不变
+  (独立的屏幕中心锚点)。
+
 ## 测试清单
 
 - [ ] `twitimer` 打印命令摘要。
@@ -326,6 +361,7 @@ twitimer sim events off
 - [ ] `twitimer flags raise/clear` 显示预期的 HUD 横幅 / 软标记行。
 - [ ] 安装或不安装 LevelCollections 时 `twitimer lc status` 均正确报告。
 - [ ] `twitimer match enter/start/tags/stop/exit` 能驱动回合并恢复用户标签。
+- [ ] match 激活期间,共享排行榜挂在比赛排行榜下方并跟随其 `show_hud`/`show_leaderboard` 显隐;其切换键无效(T7.6)。
 - [ ] `twitimer match segments` 在 `twitimer match stop` 后仍保留已完成回合数据。
 - [ ] `twitimer sim status` 报告已注册 provider 及其实时查询结果。
 - [ ] `twitimer sim events on` 输出预期的 T4 对外事件序列。

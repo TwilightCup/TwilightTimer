@@ -202,7 +202,10 @@ namespace TwilightTimer
             sb.AppendLine($"markers={(s.MarkersEnable ? "on" : "off")} currentLevel=\"{markers?.CurrentLevelKey}\" markers={markerCount} feed={markers?.Feed.Count ?? 0}");
 
             var lb = LeaderboardHud.Instance;
-            sb.AppendLine($"leaderboard={(lb != null && lb.Visible ? "visible" : "hidden")} mode={cfg.Layout.LeaderboardMode}");
+            sb.Append($"leaderboard={(lb != null && lb.Visible ? "visible" : "hidden")} mode={cfg.Layout.LeaderboardMode}");
+            if (lb != null)
+                sb.Append($" anchoredBelowMatch={lb.AnchoredBelowMatch} topY={lb.LastTopY.ToString("0.#", CultureInfo.InvariantCulture)}");
+            sb.AppendLine();
 
             var lc = LcIntegration.Instance;
             sb.AppendLine($"lc={(lc != null && lc.Enabled ? "enabled" : "absent")} inRun={lc != null && lc.IsInCollectionRun} lastLevel={lc != null && lc.IsLastLevelOfCollection} name=\"{lc?.CollectionName}\"");
@@ -472,13 +475,36 @@ namespace TwilightTimer
                     lb.SetMode(args[1]);
                     break;
                 case "status":
-                    Print($"leaderboard = {(lb.Visible ? "visible" : "hidden")}, mode = {cfg.Layout.LeaderboardMode}");
+                    PrintLeaderboardStatus(cfg, lb);
                     return;
                 default:
                     Print("Usage: twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]");
                     return;
             }
-            Print($"leaderboard = {(lb.Visible ? "visible" : "hidden")}, mode = {cfg.Layout.LeaderboardMode}");
+            PrintLeaderboardStatus(cfg, lb);
+        }
+
+        /// <summary>
+        /// One-line shared-leaderboard status for the dev console: the local
+        /// show/mode state, and — during a match session (T7.6) — whether the
+        /// HUD is following the match leaderboard plus the resolved top anchor.
+        /// </summary>
+        private static void PrintLeaderboardStatus(ConfigService cfg, LeaderboardHud lb)
+        {
+            var sb = new StringBuilder();
+            sb.Append("leaderboard = ").Append(lb.Visible ? "visible" : "hidden");
+            sb.Append(", mode = ").Append(cfg.Layout.LeaderboardMode);
+            sb.Append(", matchMode = ").Append(MatchMode.Active ? "on" : "off");
+            if (MatchMode.Active)
+            {
+                sb.Append(", matchLeaderboard = ").Append(MatchLeaderboardHud.Visible ? "shown" : "hidden");
+                sb.Append(", follow = ").Append(MatchLeaderboardHud.Visible ? "shown" : "hidden");
+            }
+            sb.Append(", anchoredBelowMatch = ").Append(lb.AnchoredBelowMatch ? "true" : "false");
+            if (lb.AnchoredBelowMatch && !float.IsNaN(MatchLeaderboardHud.BottomY))
+                sb.Append(", matchBottomY = ").Append(MatchLeaderboardHud.BottomY.ToString("0.#", CultureInfo.InvariantCulture));
+            sb.Append(", topY = ").Append(lb.LastTopY.ToString("0.#", CultureInfo.InvariantCulture));
+            Print(sb.ToString());
         }
 
         // ── layout ─────────────────────────────────────────────────────────

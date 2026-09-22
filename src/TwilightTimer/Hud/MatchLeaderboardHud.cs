@@ -21,12 +21,32 @@ namespace TwilightTimer
     /// default gradient. Hidden entirely outside match rounds and behind the
     /// ShowHud/ShowLeaderboard toggles; the keybind (default Tab, rebindable
     /// like the other keys) flips ShowLeaderboard live.
+    ///
+    /// The rows are measured in <see cref="Update"/> (not in OnGUI) so the
+    /// shared <see cref="LeaderboardHud"/> can read the block's bottom edge
+    /// from <see cref="BottomY"/> in the same frame, independent of OnGUI
+    /// callback order (T7.6).
     /// </summary>
     public class MatchLeaderboardHud : MonoBehaviour
     {
+        /// <summary>Vertical gap (px) between the match leaderboard's bottom edge
+        /// and the shared leaderboard hung below it (T7.6).</summary>
+        public const float SharedLeaderboardGap = 6f;
+
         private GUIStyle _rowStyle;
         private Font _font;
         private int _appliedFontSize = -1;
+
+        // Latest measured draw block, rebuilt every Update.
+        private readonly List<RowLines> _lines = new List<RowLines>();
+        private float _startX;
+        private float _startY;
+
+        /// <summary>True while the match leaderboard is rendered this frame.</summary>
+        public static bool Visible { get; private set; }
+
+        /// <summary>Bottom edge (screen px) of the rendered block; NaN when hidden.</summary>
+        public static float BottomY { get; private set; } = float.NaN;
 
         private void Awake()
         {
@@ -49,10 +69,18 @@ namespace TwilightTimer
             // (layout+repaint passes) — poll once here instead.
             LeaderboardFeed.Poll();
 
-            // Show/hide keybind (default Tab), mirroring the engine's keybind
-            // handling: always active except while the settings panel is open
-            // (so rebinding/typing can't flip it). Toggling persists to disk
-            // like the other keybinds' settings do.
+            HandleKeybind();
+            RebuildLayout();
+        }
+
+        /// <summary>
+        /// Show/hide keybind (default Tab), mirroring the engine's keybind
+        /// handling: always active except while the settings panel is open
+        /// (so rebinding/typing can't flip it). Toggling persists to disk
+        /// like the other keybinds' settings do.
+        /// </summary>
+        private void HandleKeybind()
+        {
             var cfg = ConfigService.Instance;
             if (cfg == null) return;
             if (SettingsPanel.Instance != null && SettingsPanel.Instance.IsVisible) return;
@@ -63,8 +91,17 @@ namespace TwilightTimer
             }
         }
 
-        private void OnGUI()
+        /// <summary>
+        /// Measure the current rows and cache the draw geometry. Runs once per
+        /// frame in Update so <see cref="LeaderboardHud"/> can anchor below the
+        /// block in the same frame (T7.6) regardless of OnGUI callback order.
+        /// </summary>
+        private void RebuildLayout()
         {
+            Visible = false;
+            BottomY = float.NaN;
+            _lines.Clear();
+
             var cfg = ConfigService.Instance;
             if (cfg == null) return;
 
@@ -84,28 +121,29 @@ namespace TwilightTimer
 
             // Build the line segments first, measure the block, then draw
             // vertically centred on the left edge.
-            var lines = new List<RowLines>(rows.Count);
-            float widest = 0f, blockHeight = 0f;
+            float blockHeight = 0f;
             foreach (var row in rows)
             {
                 var segs = BuildSegments(row);
-                float w = 0f;
-                foreach (var s in segs)
-                {
-                    var sz = _rowStyle.CalcSize(new GUIContent(s.Text));
-                    w += sz.x + s.GapAfter;
-                }
                 var lineH = _rowStyle.CalcSize(new GUIContent("Ag")).y;
-                lines.Add(new RowLines { Segments = segs, Height = lineH });
-                if (w > widest) widest = w;
+                _lines.Add(new RowLines { Segments = segs, Height = lineH });
                 blockHeight += lineH + 2f;
             }
 
-            float x = layout.LeaderboardMarginX;
-            float y = Screen.height * 0.5f - blockHeight * 0.5f + layout.LeaderboardOffsetY;
-            foreach (var line in lines)
+            _startX = layout.LeaderboardMarginX;
+            _startY = Screen.height * 0.5f - blockHeight * 0.5f + layout.LeaderboardOffsetY;
+            BottomY = _startY + blockHeight;
+            Visible = true;
+        }
+
+        private void OnGUI()
+        {
+            if (!Visible) return;
+
+            float y = _startY;
+            foreach (var line in _lines)
             {
-                float cx = x;
+                float cx = _startX;
                 foreach (var seg in line.Segments)
                 {
                     TimerHud.DrawGradientLine(seg.Text, seg.ColorA, seg.ColorB, cx, y, _rowStyle);

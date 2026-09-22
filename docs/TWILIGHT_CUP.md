@@ -84,6 +84,19 @@ module's runtime state, and a level that was suppressed at any point is
 ineligible for recording (no partial-trajectory PB); recording resumes
 normally at the next level start after the match ends.
 
+**T7.6 — the shared leaderboard follows the match leaderboard.** The shared
+R8.5/R10.7 leaderboard HUD (`Hud/LeaderboardHud.cs`, subsegment or markers
+content) is subordinated to the in-match leaderboard for the whole match
+session: it is drawn only while the in-match leaderboard is drawn
+(`show_hud` + `show_leaderboard` + an active round), and its top edge is
+anchored a few pixels below that block instead of at the screen center, so it
+hangs underneath the two player rows. Its own hidden/Subsegment/Markers cycle
+state is ignored while a match is active, and the mode-cycle key
+(`Subsegment.ToggleKey`) is disabled for the whole match session. T7.5 still
+governs content: the subsegment module stays off, so only markers mode (R10.7)
+produces rows during a match. Outside a match the standalone behavior and the
+cycle key are unchanged.
+
 ## ITimerProvider adapter (T1)
 
 `Match/TwilightTimerProvider.cs` implements TwilightCore's published
@@ -109,7 +122,8 @@ gateway probing for `TwilightCore.Leaderboard.LeaderboardApi` (specified in
 that API, the gateway probe fails cleanly and the leaderboard runs in
 **transition mode**: the local row only, built entirely from
 `RoundTracker` / `RunState` / `CollectionManager`, name falling back to the
-localized "You" and no seat colour.
+localized "You" and no seat colour. While it is shown, the shared leaderboard
+hangs below it (T7.6).
 
 ## Driving without TwilightCore (debug)
 

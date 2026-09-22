@@ -13,6 +13,13 @@ namespace TwilightTimer
     /// size, offsets, entry colors) comes from the layout model and applies
     /// to both modes; the mode-cycle key (<c>SubsegmentToggleKey</c>) lives
     /// here and cycles: hidden → Subsegment → Markers → hidden.
+    ///
+    /// During a match session (T7.6) the standalone show/hide state and
+    /// center anchor are overridden: the HUD is shown exactly while the
+    /// match leaderboard (<see cref="MatchLeaderboardHud"/>) is shown, and it
+    /// hangs directly below that block instead of at the screen center. The
+    /// mode-cycle key is disabled for the whole match session so the
+    /// competition display cannot be flipped by a stray keypress.
     /// </summary>
     public sealed class LeaderboardHud : MonoBehaviour
     {
@@ -25,6 +32,12 @@ namespace TwilightTimer
 
         /// <summary>Whether the leaderboard is currently shown (R8.5.1.2).</summary>
         public bool Visible => _visible;
+
+        /// <summary>Top Y used by the last draw (console/test diagnostics).</summary>
+        public float LastTopY { get; private set; }
+
+        /// <summary>True when the last draw hung below the match leaderboard (T7.6).</summary>
+        public bool AnchoredBelowMatch { get; private set; }
 
         private void Awake()
         {
@@ -131,20 +144,37 @@ namespace TwilightTimer
 
         private void OnGUI()
         {
-            if (!_visible) return;
             var cfg = ConfigService.Instance;
             if (cfg == null) return;
 
+            // T7.6: during a match session the shared leaderboard follows the
+            // match leaderboard — shown exactly while it is shown (the local
+            // cycle state is ignored) and anchored directly below it. Outside
+            // a match the standalone behavior is kept.
+            bool followMatch = MatchMode.Active;
+            bool shown = followMatch ? MatchLeaderboardHud.Visible : _visible;
+            AnchoredBelowMatch = shown && followMatch && !float.IsNaN(MatchLeaderboardHud.BottomY);
+
+            // Fixed top anchor: the title/rows always start here and extend
+            // downward, so the top edge does not move as content changes.
+            // Inside a match it hangs below the match leaderboard (T7.6),
+            // otherwise it keeps the standalone center anchor (R8.5.1.1).
+            LastTopY = AnchoredBelowMatch
+                ? MatchLeaderboardHud.BottomY + MatchLeaderboardHud.SharedLeaderboardGap
+                : Screen.height * 0.5f + cfg.Layout.LeaderboardOffsetY;
+
+            if (!shown) return;
+
             bool markersMode = string.Equals(cfg.Layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase);
             if (markersMode)
-                DrawMarkers(cfg);
+                DrawMarkers(cfg, LastTopY);
             else
-                DrawSubsegment(cfg);
+                DrawSubsegment(cfg, LastTopY);
         }
 
         // ── Subsegment mode (R8.5) ─────────────────────────────────────────
 
-        private void DrawSubsegment(ConfigService cfg)
+        private void DrawSubsegment(ConfigService cfg, float topY)
         {
             var mgr = SubsegmentManager.Instance;
             // T7.5: the local subsegment leaderboard is suppressed for the whole
@@ -172,9 +202,7 @@ namespace TwilightTimer
 
             float lineHeight = _rowStyle.CalcSize(new GUIContent("Wg")).y + 2f;
             float x = layout.LeaderboardOffsetX;
-            // Fixed top anchor: the title/rows always start here and extend
-            // downward, so the top edge does not move as entries change.
-            float y = Screen.height * 0.5f + layout.LeaderboardOffsetY;
+            float y = topY;
 
             string title = mgr.LeaderboardTitle;
             if (!string.IsNullOrEmpty(title))
@@ -200,7 +228,7 @@ namespace TwilightTimer
 
         // ── Markers mode (R10.7) ───────────────────────────────────────────
 
-        private void DrawMarkers(ConfigService cfg)
+        private void DrawMarkers(ConfigService cfg, float topY)
         {
             var mgr = MarkersManager.Instance;
             if (mgr == null || !mgr.HasFeedData) return;
@@ -228,9 +256,7 @@ namespace TwilightTimer
             bool hasTitle = !string.IsNullOrEmpty(title);
             float lineHeight = _rowStyle.CalcSize(new GUIContent("Wg")).y + 2f;
             float x = layout.LeaderboardOffsetX;
-            // Fixed top anchor: the title/rows always start here and extend
-            // downward, so adding a new feed row does not move the top edge.
-            float y = Screen.height * 0.5f + layout.LeaderboardOffsetY;
+            float y = topY;
 
             if (hasTitle)
             {

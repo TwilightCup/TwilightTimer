@@ -67,6 +67,15 @@ HUD 标签行与面板类别页。
 时刻被抑制过的关卡都不再具备记录资格（避免残缺轨迹写入 PB），比赛结束后
 从下一个关卡开始正常记录。
 
+**T7.6 —— 共享排行榜跟随比赛排行榜。** 共享的 R8.5/R10.7 排行榜 HUD
+（`Hud/LeaderboardHud.cs`，subsegment 或 markers 内容）在整个比赛对局内
+从属于对局排行榜：仅在对局排行榜显示时显示（`show_hud` + `show_leaderboard`
++ 回合进行中），且其顶边锚定在该块下方数个像素处而非屏幕垂直中心，因此
+挂在两名选手行的正下方。比赛激活期间忽略它自身的隐藏/Subsegment/Markers
+循环状态，且切换键（`Subsegment.ToggleKey`）在整个比赛对局内被禁用。
+内容仍受 T7.5 约束：subsegment 模块保持关闭，故比赛期间只有 markers 模式
+（R10.7）会产生行。比赛之外，独立行为与切换键均不变。
+
 ## ITimerProvider 适配器（T1）
 
 `Match/TwilightTimerProvider.cs` 实现 TwilightCore 已发布的
@@ -88,7 +97,8 @@ Real Time 现实/墙钟值 `real_time_ms`。游戏内
 [LEADERBOARD_REQ.md](../LEADERBOARD_REQ.md)）；在 TwilightCore 实现该
 接口之前，探测干净地失败，排行榜以**过渡模式**运行：仅本地一行，
 完全由 `RoundTracker` / `RunState` / `CollectionManager` 构建，名字
-回退为本地化的「你」，无座席配色。
+回退为本地化的「你」，无座席配色。它显示期间，共享排行榜挂在它下方
+（T7.6）。
 
 ## 无 TwilightCore 驱动的调试（T1.6）
 

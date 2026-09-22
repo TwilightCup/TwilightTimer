@@ -124,3 +124,5 @@ font_size = 0          # 0 = 跟随 [text] font_size
 seat_a_color = 4F9DFFFF
 seat_b_color = FF5A5AFF
 ```
+
+比赛对局激活期间,共享排行榜(subsegment / markers 内容,同样在左缘)从属于它:仅在对局排行榜显示时显示,并直接挂在它下方,而不再位于屏幕垂直中心、也不再受自身开关状态控制。共享排行榜的切换键在整个比赛对局内禁用。比赛期间 subsegment 内容仍被强制关闭(T7.5),故只有 markers 模式能产生行。见 [TWILIGHT_CUP.md](TWILIGHT_CUP.md) T7.6。
