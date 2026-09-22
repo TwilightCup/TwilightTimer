@@ -72,7 +72,7 @@ Real Time 现实/墙钟值 `real_time_ms`。游戏内
 
 ## 对局排行榜
 
-`Hud/LeaderboardHud.cs` 在比赛回合内渲染实时排行榜，锚点在屏幕左缘
+`Hud/MatchLeaderboardHud.cs` 在比赛回合内渲染实时排行榜，锚点在屏幕左缘
 垂直居中处，风格与计时器一致（格式/排序/配置见
 [HUD.md](HUD.md)）。其数据方向与提供方相反：TwilightCore 持有服务器
 汇总的状态，本插件消费。接缝为 `Match/LeaderboardFeed.cs` —— 反射

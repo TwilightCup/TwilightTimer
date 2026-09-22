@@ -77,6 +77,22 @@ namespace TwilightTimer
     /// </remarks>
     public static class TimeFormatter
     {
+        /// <summary>
+        /// Format a short per-level duration as SS:mmm (seconds and milliseconds
+        /// only, no minute/hour breakdown). Used for the Wake Up Time display.
+        /// </summary>
+        public static string FormatWakeUp(double? secondsNullable)
+        {
+            if (!secondsNullable.HasValue || secondsNullable.Value < 0d)
+                return "--:--";
+            double seconds = secondsNullable.Value;
+            int totalMs = (int)((seconds - (int)seconds) * 1000 + 0.5);
+            if (totalMs >= 1000) { seconds += 1; totalMs -= 1000; }
+            int totalSeconds = (int)seconds;
+            return totalSeconds.ToString("D2", CultureInfo.InvariantCulture)
+                + ":" + Three(totalMs);
+        }
+
         public static string Format(double? secondsNullable)
         {
             if (!secondsNullable.HasValue || secondsNullable.Value < 0d)
@@ -123,6 +139,34 @@ namespace TwilightTimer
                 sb.Append(h).Append(':').Append(Two(m)).Append(':').Append(Two(s));
             else
                 sb.Append(Two(m)).Append(':').Append(Two(s));
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Format a signed millisecond diff as <c>+MM:SS.mmm</c> / <c>-MM:SS.mmm</c>
+        /// (R8.5.2.2, R10.7.3). Null or zero renders as <c>--</c>.
+        /// </summary>
+        public static string FormatSignedDiff(long? diffMs)
+        {
+            if (!diffMs.HasValue || diffMs.Value == 0)
+                return "--";
+            long d = diffMs.Value;
+            char sign = d < 0 ? '-' : d > 0 ? '+' : ' ';
+            long abs = d < 0 ? -d : d;
+            long totalSeconds = abs / 1000L;
+            long ms = abs % 1000L;
+            long minutes = totalSeconds / 60L;
+            long seconds = totalSeconds % 60L;
+            var sb = new StringBuilder();
+            if (sign != ' ')
+                sb.Append(sign);
+            else
+                sb.Append(' ');
+            sb.Append(minutes.ToString("D2", CultureInfo.InvariantCulture));
+            sb.Append(':');
+            sb.Append(seconds.ToString("D2", CultureInfo.InvariantCulture));
+            sb.Append('.');
+            sb.Append(ms.ToString("D3", CultureInfo.InvariantCulture));
             return sb.ToString();
         }
 

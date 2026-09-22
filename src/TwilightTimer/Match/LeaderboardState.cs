@@ -36,7 +36,7 @@ namespace TwilightTimer
 
     /// <summary>
     /// Pure state + row building + sorting for the in-match leaderboard HUD
-    /// (no drawing — that lives in <see cref="LeaderboardHud"/>). Two data
+    /// (no drawing — that lives in <see cref="MatchLeaderboardHud"/>). Two data
     /// sources with a strict precedence:
     ///
     /// 1. <see cref="LeaderboardFeed"/> — TwilightCore's server-fed snapshot

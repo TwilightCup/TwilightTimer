@@ -24,6 +24,9 @@ namespace TwilightTimer
         private ConfigService _cfg;
         private TimingOptions _opt;
 
+        private HumanState _prevHumanState;
+        private bool _prevHumanStateInit;
+
         private void Awake()
         {
             Instance = this;
@@ -74,10 +77,14 @@ namespace TwilightTimer
                 if (State.InSegment && game.passedLevel)
                     State.LevelPassed = true;
 
-                // Detect transitions first (uses cached prev), then accumulate,
-                // then run per-tick rules.
+                // Detect transitions first (uses cached prev), then respawns,
+                // then accumulate, then run per-tick rules.
                 HandleTransitions(game, gState, aState, isLocal);
+                TrackRespawn(game, gState);
                 Accumulate(game, gState, aState);
+                TrackWakeUp(game, gState);
+                SubsegmentManager.Instance?.OnPhysicsTick(game, gState, State);
+                MarkersManager.Instance?.OnPhysicsTick(game, gState, State);
                 RunRules(game, gState);
             }
 
@@ -104,6 +111,13 @@ namespace TwilightTimer
             // paused when timeScale=0).
             if (SegmentLogic.ShouldAccumulatePause(gState, State.TimingActive))
                 State.GameTime += Time.unscaledDeltaTime;
+
+            // Subsegment quiet-settle windows run in unscaled time so they
+            // continue through pauses (R8.4.3.4).
+            SubsegmentManager.Instance?.OnUpdate();
+
+            // Markers: flush dirty marker-set edits (R10.5.8).
+            MarkersManager.Instance?.OnUpdate();
 
             // Real-time clock: unlike game time this is not tied to a playable
             // state, so it keeps advancing through level loading screens and
@@ -162,6 +176,8 @@ namespace TwilightTimer
                 && !RoundTracker.RoundActive
                 && SegmentLogic.IsAutoReset(prevG, gState, prevA, aState, isLocal, State.Retrying))
             {
+                SubsegmentManager.Instance?.OnRunExit();
+                MarkersManager.Instance?.OnRunExit();
                 DoFullReset(keepLastValues: false, keepLastRun: true);
                 return;
             }
@@ -177,6 +193,8 @@ namespace TwilightTimer
             // (keeping the previous completed run's total as a reference).
             if (SegmentLogic.IsMenuEntry(prevA, aState))
             {
+                SubsegmentManager.Instance?.OnRunExit();
+                MarkersManager.Instance?.OnRunExit();
                 DoFullReset(keepLastValues: false, keepLastRun: true);
                 State.MenuEntryPending = true;
             }
@@ -201,6 +219,7 @@ namespace TwilightTimer
 
             int cp = game.currentCheckpointNumber;
             State.BeginSegment(State.GameTime, game.currentLevelNumber, game.currentLevelType, cp);
+            _prevHumanStateInit = false;
 
             // Snapshot the LC collection-run context AT SEGMENT START, together
             // with the level-number/type snapshots BeginSegment just took. Both
@@ -256,6 +275,13 @@ namespace TwilightTimer
             // here even after advancing to later campaign levels. The Credits
             // level is excluded because it has no gameplay; a collection-run
             // level is excluded because R6.3 (LC delegation) owns those retries.
+            //
+            // If a fresh menu entry instead starts an EditorPick, Workshop, LC
+            // collection, or Credits level, clear any previously remembered
+            // campaign target. Otherwise a stale BuiltIn target from an earlier
+            // menu-entered campaign run would make RetryAction reload that old
+            // level instead of falling back to the current EditorPick/Workshop
+            // level (R6.4.5).
             // The MenuEntryPending latch is cleared regardless — it only ever
             // describes the level that just started.
             if (State.MenuEntryPending)
@@ -268,10 +294,18 @@ namespace TwilightTimer
                     && !inCollectionRunNow;
                 if (playableCampaign)
                     State.CampaignRetryLevel = game.currentLevelNumber;
+                else
+                    State.CampaignRetryLevel = -1;
             }
             State.MenuEntryPending = false;
 
             State.Game = game; // cache for the HUD / rules
+
+            // Start/reload the local subsegment module (R8).
+            SubsegmentManager.Instance?.OnLevelStart(game, State);
+
+            // Start/reload the markers module (R10).
+            MarkersManager.Instance?.OnLevelStart(game, State);
 
             // Fire tag OnLevelEnter for every enabled tag.
             ForEachEnabledRule(rule => Safe(rule, r => r.OnLevelEnter(MakeContext(game))));
@@ -279,11 +313,18 @@ namespace TwilightTimer
 
         private void EndSegment(Game game, bool completed)
         {
+            // A manual reset clears the active segment (R1.7.1). If the level
+            // later leaves PlayingLevel without a new segment having started,
+            // there is no attempt to finalize: tag OnLevelExit / PB recording
+            // must not run, otherwise stale per-level tag state can re-raise
+            // forgivable invalid flags on the way out.
+            if (!State.InSegment)
+                return;
+
             double end = State.GameTime;
             double segStart = State.SegmentStart; // captured before EndSegment mutates it
             int roundIndex = State.RoundSegmentIndex;
             bool retrying = State.Retrying;
-            State.EndSegment(end, completed);
 
             // Fire tag OnLevelExit FIRST — but only for a genuine level
             // completion. A retry or a mid-level quit abandons the level (its
@@ -298,9 +339,20 @@ namespace TwilightTimer
             // BEFORE the round tracker freezes the segment's validity verdict
             // and clears SINGLE-attempt marks — otherwise they land after the
             // clear and follow the player into the next attempt (and they
-            // belong in the completion-time upload evidence anyway).
+            // belong in the completion-time upload evidence anyway). They must
+            // also precede the subsegment/marker PB writes: a run with any
+            // invalid flag (cheat, skipped checkpoint, missed voiceline, etc.)
+            // must not record subsegment or marker PBs.
             if (!retrying && completed)
                 ForEachEnabledRule(rule => Safe(rule, r => r.OnLevelExit(MakeContext(game))));
+
+            SubsegmentManager.Instance?.OnLevelEnd(
+                game, State, end, completed, retrying,
+                game != null ? game.state : GameState.Inactive, App.state);
+            MarkersManager.Instance?.OnLevelEnd(
+                game, State, end, completed, retrying,
+                game != null ? game.state : GameState.Inactive, App.state);
+            State.EndSegment(end, completed);
 
             // T4.1/T4.4: report the segment outcome to the round tracker.
             // Only genuine outcomes count — a retry reload abandons its
@@ -342,6 +394,64 @@ namespace TwilightTimer
                 _cfg.SaveSettings();
         }
 
+        // ── Wake Up time (per level / per respawn) ────────────────────────
+        /// <summary>
+        /// In the default (respawn-aware) mode, detect a local-player respawn by
+        /// the transition into <c>Spawning</c> and restart the Wake Up Time
+        /// measurement from that instant. Pause-menu Load/Restart are handled by
+        /// Harmony postfixes while FixedUpdate is halted; they call
+        /// <see cref="RestartWakeUpMeasurement"/> and mark this transition cache
+        /// as already seen so this polling path does not double-reset.
+        /// </summary>
+        private void TrackRespawn(Game game, GameState gState)
+        {
+            if (_cfg.Settings.OnlyRecordFirstWakeUpTime)
+                return;
+            if (!State.InSegment || gState != GameState.PlayingLevel)
+                return;
+
+            var human = Human.Localplayer;
+            if (human == null)
+            {
+                _prevHumanStateInit = false;
+                return;
+            }
+
+            if (!_prevHumanStateInit)
+            {
+                _prevHumanState = human.state;
+                _prevHumanStateInit = true;
+                return;
+            }
+
+            var prev = _prevHumanState;
+            if (human.state == HumanState.Spawning && prev != HumanState.Spawning)
+                State.RestartWakeUpMeasurement(State.GameTime);
+            _prevHumanState = human.state;
+        }
+
+        /// <summary>
+        /// Record the current Wake Up Time when the local player leaves the
+        /// soft/spawn state. The duration is measured from
+        /// <see cref="RunState.WakeUpMeasureStart"/>, which is the segment start
+        /// in "only first wake-up" mode and the latest respawn/restart moment in
+        /// the default mode. Once recorded it is not reset by later manual
+        /// play-dead within the same measurement; a new respawn clears it so the
+        /// next wake-up can be measured.
+        /// </summary>
+        private void TrackWakeUp(Game game, GameState gState)
+        {
+            if (State.WakeUpTime.HasValue || !State.InSegment || gState != GameState.PlayingLevel)
+                return;
+            var human = Human.Localplayer;
+            if (human == null)
+                return;
+            if (human.state == HumanState.Spawning || human.state == HumanState.Unconscious || human.state == HumanState.Dead)
+                return;
+
+            State.WakeUpTime = State.GameTime - State.WakeUpMeasureStart;
+        }
+
         // ── Accumulation (B.1) ─────────────────────────────────────────────
         private void Accumulate(Game game, GameState gState, AppSate aState)
         {
@@ -352,6 +462,13 @@ namespace TwilightTimer
         // ── Per-tick tag rules (skip/jump/nocheckpoint/voiceline-tick) ──────
         private void RunRules(Game game, GameState gState)
         {
+            // Tag rules only apply to an active segment. After a manual reset
+            // clears the segment while the level is still PlayingLevel, running
+            // OnTick with stale per-level tag state would immediately re-raise
+            // forgivable invalid flags (e.g. NoCheckpointHit / Jumpless).
+            if (!State.InSegment)
+                return;
+
             // Track max checkpoint seen for EditorPick final validation.
             int cp = game.currentCheckpointNumber;
             if (cp > State.MaxCheckpointThisLevel) State.MaxCheckpointThisLevel = cp;
@@ -399,7 +516,7 @@ namespace TwilightTimer
             var s = _cfg.Settings;
 
             // The settings panel key always works (so the user can open/close it).
-            if (Input.GetKeyDown(s.MenuKey))
+            if (InputUtil.GetKeyDown(s.MenuKey))
             {
                 if (SettingsPanel.Instance != null)
                     SettingsPanel.Instance.Toggle();
@@ -424,13 +541,39 @@ namespace TwilightTimer
                 return;
             }
 
-            if (Input.GetKeyDown(s.ResetKey))
+            // While any other keyboard-capturing UI is open (chat, text input,
+            // dialog, and the in-game dev console), suppress gameplay keybinds
+            // too. Without this, typing an 'r' inside 'twi status' can trigger a
+            // retry, and Backspace can silently full-reset a run while fixing a
+            // typo (same guard as RetryAction R6.1.2a).
+            if (MenuSystem.keyboardState != KeyboardState.None)
+                return;
+
+            if (LeaderboardHud.Instance != null && InputUtil.GetKeyDown(s.SubsegmentToggleKey))
+                LeaderboardHud.Instance.CycleMode();
+
+            if (InputUtil.GetKeyDown(s.ResetKey))
             {
                 DoFullReset(keepLastValues: false);
+
+                // R1.7.1: a manual reset must clear AND stop the timer.
+                // RunState.Reset zeroes the transition caches, which would make
+                // the still-active PlayingLevel look like a fresh
+                // LoadingLevel/Inactive -> PlayingLevel segment start on the next
+                // FixedUpdate, immediately restarting the timer and re-arming the
+                // Wake Up Time display. Restore the caches to the actual game
+                // state so the timer stays stopped until a real level entry.
+                var game = Game.instance;
+                if (game != null && game.state == GameState.PlayingLevel)
+                {
+                    State.PrevGameState = game.state;
+                    State.PrevAppState = App.state;
+                }
+
                 _cfg.SaveSettings();
                 Notify("NOTIFY_RUN_RESET");
             }
-            if (Input.GetKeyDown(s.RetryKey))
+            if (InputUtil.GetKeyDown(s.RetryKey))
             {
                 if (RetryAction.TryExecute(this, State, s, out string key))
                     UpdateOptions(); // restart may change timing context
@@ -438,11 +581,68 @@ namespace TwilightTimer
             }
         }
 
+        /// <summary>
+        /// Public entry point used by the in-game dev console to perform the
+        /// same full-run reset as the reset key.
+        /// </summary>
+        public static void ResetRun()
+        {
+            var core = Instance;
+            if (core == null || State == null)
+                return;
+
+            core.DoFullReset(keepLastValues: false);
+
+            // A manual reset must clear AND stop the timer; restore the
+            // transition caches to the actual game state so the still-active
+            // PlayingLevel does not look like a fresh segment start (mirrors the
+            // reset-key path in HandleKeybinds).
+            var game = Game.instance;
+            if (game != null && game.state == GameState.PlayingLevel)
+            {
+                State.PrevGameState = game.state;
+                State.PrevAppState = App.state;
+            }
+
+            core._cfg?.SaveSettings();
+            core.Notify("NOTIFY_RUN_RESET");
+        }
+
+        /// <summary>Re-read timing options from the live settings model.</summary>
+        public void RefreshTimingOptions() => UpdateOptions();
+
+        /// <summary>
+        /// Public entry point used by pause-menu patches to clear the current
+        /// Wake Up Time and start a fresh measurement from the current game time.
+        /// Also records the current human state as already seen so the normal
+        /// FixedUpdate respawn detection does not immediately restart again.
+        /// </summary>
+        public static void RestartWakeUpMeasurement()
+        {
+            var core = Instance;
+            if (core == null || State == null)
+                return;
+            State.RestartWakeUpMeasurement(State.GameTime);
+            var human = Human.Localplayer;
+            if (human != null)
+            {
+                core._prevHumanState = human.state;
+                core._prevHumanStateInit = true;
+            }
+            else
+            {
+                core._prevHumanStateInit = false;
+            }
+        }
+
         private void DoFullReset(bool keepLastValues, bool keepLastRun = false)
         {
+            SubsegmentManager.Instance?.OnRunReset();
+            MarkersManager.Instance?.OnRunReset();
             State.Reset(keepLastValues, keepLastRun);
             State.Flags.ClearAll();
             _cpEdgeInit = false;
+            _prevHumanStateInit = false;
             UpdateOptions();
         }
 

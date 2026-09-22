@@ -65,26 +65,30 @@ namespace TwilightTimer
         public int FontSize = 18;
 
         /// <summary>Default gradient colors applied to rows without their own colors.</summary>
-        public Color ColorA = new Color(1f, 0.85f, 0.3f, 1f);
+        public Color ColorA = GradientText.ParseColor("FF5272FF", Color.white);
 
-        public Color ColorB = new Color(1f, 0.95f, 0.6f, 1f);
+        public Color ColorB = GradientText.ParseColor("FF9A72FF", Color.white);
 
-        // ── Match leaderboard (in-match HUD anchored at the left edge's
-        // vertical centre; see LeaderboardHud). Section [leaderboard]. ──
+        // ── Leaderboard HUD (shared [leaderboard] section in layout.ini) ──
+        // Covers both the Subsegment/Markers leaderboard (offset_x, entry
+        // colours, mode) and the in-match Twilight Cup leaderboard (margin_x,
+        // seat colours). font_size and offset_y are shared by both.
+        public int LeaderboardFontSize = 16;
+        public float LeaderboardOffsetX = 16f;
+        public float LeaderboardOffsetY = 0f;
+        public Color LeaderboardColorFaster = GradientText.ParseColor("59FF66FF", new Color(0.35f, 1f, 0.4f, 1f));
+        public Color LeaderboardColorSlower = GradientText.ParseColor("FF5959FF", new Color(1f, 0.35f, 0.35f, 1f));
+        public Color LeaderboardColorTie = Color.white;
+        public string LeaderboardMode = "Subsegment";
+        public string LeaderboardMarkersTimeMode = "Relative";
 
-        /// <summary>Leaderboard margin from the left screen edge (px).</summary>
+        /// <summary>Match-leaderboard margin from the left screen edge (px).</summary>
         public float LeaderboardMarginX = 16f;
 
-        /// <summary>Leaderboard vertical offset from screen centre (px).</summary>
-        public float LeaderboardOffsetY = 0f;
-
-        /// <summary>Leaderboard font size; 0 = follow <see cref="FontSize"/>.</summary>
-        public int LeaderboardFontSize = 0;
-
-        /// <summary>Seat name colour: PLAYER_A (blue).</summary>
+        /// <summary>Match-leaderboard seat name colour: PLAYER_A (blue).</summary>
         public Color LeaderboardSeatAColor = new Color(0.31f, 0.62f, 1f, 1f);
 
-        /// <summary>Seat name colour: PLAYER_B (red).</summary>
+        /// <summary>Match-leaderboard seat name colour: PLAYER_B (red).</summary>
         public Color LeaderboardSeatBColor = new Color(1f, 0.35f, 0.35f, 1f);
 
         public void Load()
@@ -116,10 +120,16 @@ namespace TwilightTimer
                     switch (p.Key)
                     {
                         case "margin_x": LeaderboardMarginX = ParseFloat(p.Value, LeaderboardMarginX); break;
+                        case "offset_x": LeaderboardOffsetX = ParseFloat(p.Value, LeaderboardOffsetX); break;
                         case "offset_y": LeaderboardOffsetY = ParseFloat(p.Value, LeaderboardOffsetY); break;
                         case "font_size": LeaderboardFontSize = ParseInt(p.Value, LeaderboardFontSize); break;
                         case "seat_a_color": LeaderboardSeatAColor = GradientText.ParseColor(p.Value, LeaderboardSeatAColor); break;
                         case "seat_b_color": LeaderboardSeatBColor = GradientText.ParseColor(p.Value, LeaderboardSeatBColor); break;
+                        case "color_faster": LeaderboardColorFaster = GradientText.ParseColor(p.Value, LeaderboardColorFaster); break;
+                        case "color_slower": LeaderboardColorSlower = GradientText.ParseColor(p.Value, LeaderboardColorSlower); break;
+                        case "color_tie": LeaderboardColorTie = GradientText.ParseColor(p.Value, LeaderboardColorTie); break;
+                        case "mode": LeaderboardMode = p.Value; break;
+                        case "markers_time_mode": LeaderboardMarkersTimeMode = p.Value; break;
                     }
                 }
                 else if (p.Section.StartsWith("custom."))
@@ -159,7 +169,10 @@ namespace TwilightTimer
             }
         }
 
-        public void Save()
+        public void Save() => SaveTo(PersistenceService.PathFor("layout.ini"));
+
+        /// <summary>Serialize this layout to a specific file (live layout.ini or a preset snapshot).</summary>
+        public void SaveTo(string path)
         {
             var sections = new List<KeyValuePair<string, IDictionary<string, string>>>();
 
@@ -180,11 +193,17 @@ namespace TwilightTimer
 
             var leaderboard = new Dictionary<string, string>
             {
-                ["margin_x"] = LeaderboardMarginX.ToString("F0", CultureInfo.InvariantCulture),
-                ["offset_y"] = LeaderboardOffsetY.ToString("F0", CultureInfo.InvariantCulture),
                 ["font_size"] = LeaderboardFontSize.ToString(CultureInfo.InvariantCulture),
+                ["offset_x"] = LeaderboardOffsetX.ToString("0.###", CultureInfo.InvariantCulture),
+                ["offset_y"] = LeaderboardOffsetY.ToString("0.###", CultureInfo.InvariantCulture),
+                ["margin_x"] = LeaderboardMarginX.ToString("F0", CultureInfo.InvariantCulture),
+                ["color_faster"] = GradientText.ToHex(LeaderboardColorFaster),
+                ["color_slower"] = GradientText.ToHex(LeaderboardColorSlower),
+                ["color_tie"] = GradientText.ToHex(LeaderboardColorTie),
                 ["seat_a_color"] = GradientText.ToHex(LeaderboardSeatAColor),
                 ["seat_b_color"] = GradientText.ToHex(LeaderboardSeatBColor),
+                ["mode"] = LeaderboardMode,
+                ["markers_time_mode"] = LeaderboardMarkersTimeMode,
             };
             sections.Add(new KeyValuePair<string, IDictionary<string, string>>("leaderboard", leaderboard));
 
@@ -202,9 +221,9 @@ namespace TwilightTimer
             }
 
             PersistenceService.Write(
-                PersistenceService.PathFor("layout.ini"),
+                path,
                 sections,
-                "TwilightTimer HUD layout. Text is drawn directly on screen (no window).\n# [text] offset_x/offset_y (top-left px), font_size, color_a/color_b;\n# [rows] ordered row types; [custom.<n>] arbitrary on-screen texts (template vars);\n# [leaderboard] in-match leaderboard: margin_x/offset_y (left-edge centre), font_size (0=follow [text]), seat_a_color/seat_b_color.");
+                "TwilightTimer HUD layout. Text is drawn directly on screen (no window).\n# [text] offset_x/offset_y (top-left px), font_size, color_a/color_b;\n# [rows] ordered row types; [leaderboard] shared leaderboard HUD: font_size/offset_y (both), offset_x + color_faster/slower/tie + mode + markers_time_mode (Subsegment/Markers), margin_x + seat_a_color/seat_b_color (in-match);\n# [custom.<n>] arbitrary on-screen texts (template vars).");
         }
 
         // ── helpers ──

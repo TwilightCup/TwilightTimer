@@ -102,6 +102,10 @@
       <HintPath>$(GAME_MANAGED)/UnityEngine.PhysicsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(GAME_MANAGED)/UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- Ship default language files alongside the DLL -->
@@ -122,5 +126,11 @@
       <LogicalName>TwilightTimer.lang.zh-Hans.txt</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
+
+  <!-- Emit a versioned filename for releases alongside the plain DLL. -->
+  <Target Name="CopyVersionedDll" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)TwilightTimer-v$(Version).dll" />
+    <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFiles="$(TargetDir)TwilightTimer-v$(Version).pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+  </Target>
 
 </Project>

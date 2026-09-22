@@ -29,12 +29,25 @@ namespace TwilightTimer
             //    DLL, so localization works even if the lang/ folder is absent.
             var config = new ConfigService();
             ConfigService.Init(config);
+
+            // 1.5 Settings-panel tab extension point (R9). Initialize it before
+            //     config repair below, which may call SaveSettings and must reach
+            //     external SettingsSaved handlers. Init preserves a registry that
+            //     another plugin lazily created before this Awake.
+            SettingsPanelTabRegistry.Init(new SettingsPanelTabRegistry());
+            config.SettingsSaved += SettingsPanelTabRegistry.Instance.NotifySettingsSaved;
+
             EnsureDefaultLangFiles();
             config.Load();
             // Detect & fill in missing/incorrect config items before any
             // subsystem reads them (e.g. insert a newly-defaulted HUD row into
             // an existing layout.ini). Idempotent; writes only on change.
             ConfigRepair.Run(config);
+
+            // 1.6 Presets (R11): create the default preset on first load / upgrade
+            //     and repair the selected preset to a valid one. Runs after config
+            //     load/repair so the default snapshot reflects the effective config.
+            PresetStore.EnsureInitialized(config);
 
             // 2. Register built-in tag rules (R3.7 extension point).
             var registry = new TagRuleRegistry();
@@ -43,6 +56,8 @@ namespace TwilightTimer
             registry.Register(new NoCheckpointTagRule());
             registry.Register(new JumplessTagRule());
             registry.Register(new VoicelineTagRule());
+            registry.Register(new GlitchlessTagRule());
+            registry.Register(new NoEcTagRule());
 
             // 3. Harmony patches (voiceline hooks only).
             PatchModule.Apply();
@@ -85,6 +100,13 @@ namespace TwilightTimer
                 yield return null;
             LcIntegration.Instance.SubscribeEvents();
 
+            // 4.5 Language-aware settings tabs: tell them the active language now
+            //     that config is loaded. Tabs registered later receive it from
+            //     SettingsPanelTabRegistry.Register.
+            var cfg = ConfigService.Instance;
+            if (cfg != null)
+                SettingsPanelTabRegistry.Instance.NotifyLanguageChanged(cfg.Localization.CurrentCode);
+
             // 5. Engine + HUD + settings-panel singletons, persistent across scene loads.
             var engineGo = new GameObject("TwilightTimer.Core");
             Object.DontDestroyOnLoad(engineGo);
@@ -95,13 +117,30 @@ namespace TwilightTimer
             hudGo.AddComponent<TimerHud>();
             hudGo.AddComponent<ProgressIndicatorMover>();
 
-            var lbGo = new GameObject("TwilightTimer.LeaderboardHud");
+            var lbGo = new GameObject("TwilightTimer.MatchLeaderboardHud");
             Object.DontDestroyOnLoad(lbGo);
-            lbGo.AddComponent<LeaderboardHud>();
+            lbGo.AddComponent<MatchLeaderboardHud>();
 
             var panelGo = new GameObject("TwilightTimer.Panel");
             Object.DontDestroyOnLoad(panelGo);
             panelGo.AddComponent<SettingsPanel>();
+
+            // 6. Subsegment module (R8): recorder/loader/comparator + leaderboard HUD.
+            var subGo = new GameObject("TwilightTimer.Subsegment");
+            Object.DontDestroyOnLoad(subGo);
+            subGo.AddComponent<SubsegmentManager>();
+            subGo.AddComponent<LeaderboardHud>();
+
+            // 7. Markers module (R10): trigger engine + 3D edit-mode overlay.
+            var markersGo = new GameObject("TwilightTimer.Markers");
+            Object.DontDestroyOnLoad(markersGo);
+            markersGo.AddComponent<MarkersManager>();
+            markersGo.AddComponent<MarkerOverlay>();
+
+            // 8. In-game dev console: register the "twi ..." commands with the
+            //     game's Shell console (~ / F1) so every feature can be inspected
+            //     and tested from inside the game. Safe before Shell.instance exists.
+            ConsoleCommands.Register();
         }
 
         /// <summary>

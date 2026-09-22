@@ -2,8 +2,9 @@
 
 > **English (source of truth)**: [../CONFIG.md](../CONFIG.md)
 
-所有配置位于 `<BepInEx 配置目录>/TwilightTimer/`(典型安装下为
-`~/Library/Application Support/Steam/steamapps/common/Human Fall Flat/BepInEx/config/TwilightTimer/`)。
+所有配置位于 `<BepInEx 配置目录>/TwilightTimer/`(典型 macOS Steam 安装下为
+`~/Library/Application Support/Steam/steamapps/common/Human Fall Flat/BepInEx/config/TwilightTimer/`;Linux 下为
+`~/.local/share/Steam/steamapps/common/Human Fall Flat/BepInEx/config/TwilightTimer/`)。
 文件为人类可读的分节 `key = value` 文本,`#` 行为注释。
 
 每个文件都**逐行容错解析**:格式错误的行会被跳过,并在日志中给出文件名与行号的警告。插件绝不会因一行错误而无法启动(规格 N6)。缺失的键回退到默认值。
@@ -15,9 +16,13 @@
 auto_reset = true
 restart_clears_forgivable = false
 retry_min_dwell = 0.5
+retry_level_override_enabled = false
+retry_level_override =
 show_hud = true
 show_leaderboard = true
 show_real_time = true
+show_wake_up_time = true
+only_record_first_wake_up_time = false
 center_loading_saving = false
 language = en
 reset_key = Backspace
@@ -31,9 +36,13 @@ leaderboard_key = Tab
 | `auto_reset` | true/false | true | R1.7.2 —— 退出到菜单 / 大厅时清零实时计时器与上一段快照,并保留上一局总时间 |
 | `restart_clears_forgivable` | true/false | false | R5.4.3 —— 在关卡内**暂停菜单**点击"重新开始"时清除可原谅的有效性标记(计时器继续计时,不重置)。一键重试则无条件清除(固定行为);整局重置会清除全部标记。 |
 | `retry_min_dwell` | 秒(≥0) | 0.5 | R6 重试时在空场景强制停留的最短时间,从按下重试键开始计。若关卡重载快于该值,则在空场景内等待到该时间后再重载;`0` 表示不强制停留。 |
+| `retry_level_override_enabled` | true/false | false | R6.5 —— 使用固定的重试关卡,而不是当前关卡 / 从菜单进入的战役起点关。关闭时保持现有的一键重试行为。 |
+| `retry_level_override` | 字符串(关卡英文名或创意工坊数字 id) | (空) | R6.5 —— 一键重试目标。官方关卡按英文名不区分大小写匹配;创意工坊关卡填已加载的 Steam Workshop 数字 id。无效值会在按下重试键时用计时器面板的红色无效样式提示,且不执行重试。开启且当前没有活动关卡时(例如主菜单),按重试键会**直接进入**该指定关卡。 |
 | `show_hud` | true/false | true | R2.5.1 |
 | `show_leaderboard` | true/false | true | 对局排行榜 HUD(仍受 `show_hud` 总开关约束;见 [HUD.md](HUD.md)) |
 | `show_real_time` | true/false | true | R2.5.3 —— 在面板中显示始终活跃的现实时间计时器(默认显示在游戏总时间下方;可关闭) |
+| `show_wake_up_time` | true/false | true | 在右侧列显示“起身时间”;与“上一局游戏时间”同时可见时显示在其下一行。默认从最近一次可起身起点(本关开始、玩家重生、暂停菜单加载存档点、暂停菜单重新开始关卡)开始测量,到下一次起身为止 |
+| `only_record_first_wake_up_time` | true/false | false | R2.5.5 —— 恢复原来的起身时间机制:只记录本关开始后的第一次起身,后续重生、加载存档点或重新开始关卡不重置。设置面板中仅在 `show_wake_up_time` 开启时可见 |
 | `center_loading_saving` | true/false | false | 将游戏自带的右上角"加载/保存"进度提示移动到画面顶部居中 |
 | `language` | BCP-47 代码 | en | 对应一个 `lang/<code>.txt` |
 | `reset_key` | KeyCode | Backspace | 重置成绩键 |
@@ -47,7 +56,7 @@ leaderboard_key = Tab
 
 > **提示:** 与其手改 `settings.ini`,不如在游戏内按 **设置面板键**(默认 `Home`)。所有选项都可在面板内编辑,改动实时生效,并在关闭面板 / 退出游戏时写盘。
 
-键位为 Unity `KeyCode` 枚举名,如 `Backspace`、`Home`、`R`、`Keypad0`、`Alpha1`、`LeftControl`。
+键位为 Unity `KeyCode` 枚举名,如 `Backspace`、`Home`、`R`、`Keypad0`、`Alpha1`、`LeftControl`。鼠标侧键(`Mouse3`–`Mouse6`)也可用作按键;鼠标左 / 右键刻意不能在设置面板中绑定。
 
 ## tags.ini
 
@@ -58,7 +67,7 @@ TwilightTimer **没有类别预设**。当前的规则集就是用户启用的�
 enabled = Checkpoint, Jumpless
 ```
 
-- `enabled` —— 逗号分隔的标签 id。内置 id:`Checkpoint`、`NoCheckpoint`、`Jumpless`、`Voiceline`。第三方插件的自定义标签用其自身的 id(见 [EXTENDING.md](EXTENDING.md))。留空即为纯任意%(仅受通用有效性约束)。
+- `enabled` —— 逗号分隔的标签 id。内置 id:`Checkpoint`、`NoCheckpoint`、`Jumpless`、`Voiceline`、`Glitchless`、`NoEC`。第三方插件的自定义标签用其自身的 id(见 [EXTENDING.md](EXTENDING.md))。留空即为纯任意%(仅受通用有效性约束)。
 
 见 [CATEGORIES.md](CATEGORIES.md)。
 
@@ -69,13 +78,23 @@ enabled = Checkpoint, Jumpless
 offset_x = 16
 offset_y = 16
 font_size = 18
-color_a = FFD950FF
-color_b = FFF299FF
+color_a = FF5272FF
+color_b = FF9A72FF
 
 [rows]
 0 = GameTime
 1 = CurrentSegment
 2 = LastSegment
+
+[leaderboard]
+font_size = 16
+offset_x = 16
+offset_y = 0
+color_faster = 59FF66FF
+color_slower = FF5959FF
+color_tie = FFFFFFFF
+mode = Subsegment
+markers_time_mode = Relative
 
 [custom.0]
 x = 400
@@ -98,11 +117,111 @@ seat_b_color = FF5A5AFF
 ```
 
 - `[text]` —— 主文本块直接绘制在屏幕上(无窗口、不可拖动)。`offset_x`/`offset_y` 为距屏幕左上角的像素偏移;`font_size` 为字号;`color_a`/`color_b` 为默认双色渐变(十六进制,见 [HUD.md](HUD.md))。
-- `[rows]` —— 有序行;键为从 0 开始的索引。行类型:`GameTime`、`RealTime`、`CurrentSegment`、`LastSegment`、`LastRun`、`CurrentState`。`RealTime` 还受 `show_real_time` 设置控制(默认开启)。
+- `[rows]` —— 有序行;键为从 0 开始的索引。行类型:`GameTime`、`RealTime`、`CurrentSegment`、`LastSegment`、`LastRun`、`CurrentState`。`RealTime` 还受 `show_real_time` 设置控制(默认开启)。起身时间不是行类型 —— 它显示在“上一局游戏时间”旁边的右侧列,由 `show_wake_up_time` 控制。
+- `[leaderboard]` —— 共享排行榜 HUD（分段对比 / 标记模式）。`font_size`、`offset_x`、`offset_y`、`color_faster`、`color_slower`、`color_tie`、`mode`、`markers_time_mode` 控制其外观与显示模式。`offset_y` 相对屏幕垂直中心的固定顶部锚点；内容向下延伸。
 - `[custom.<n>]` —— 位于 `(x, y)` 的任意屏上文本,各自带渐变。模板变量:`{date}`、`{time}`、`{version}`、`{collection}`、`{category}`、`{gametime}`、`{realtime}`。
 - `[leaderboard]` —— 对局排行榜(锚点在屏幕左缘垂直居中;见 [HUD.md](HUD.md)):`margin_x`(距左缘像素)、`offset_y`(垂直居中微调)、`font_size`(`0` = 跟随 `[text] font_size`)、`seat_a_color`/`seat_b_color`(座席名字颜色,十六进制)。
 
 整个计时器的显示/隐藏由 `settings.ini` 中的 `show_hud`(及切换面板键)控制,不在 `layout.ini` 中。
+
+## settings.ini — [Subsegment]
+
+自 R8 起，`[Subsegment]` 节会与普通 `[settings]` 节一同写入 `settings.ini`（也可手动添加）。它同样由容错读取/写入器管理。
+
+```ini
+[Subsegment]
+Enable = true
+PBPath = subsegment/pb
+LoadPath = subsegment/load
+ToggleKey = Tab
+MultiProject = Any%
+PlaneRadius = 50.0
+MinMove = 0.5
+SampleInterval = 1.0
+QuietSettleSeconds = 0.5
+PlaneDebounceSeconds = 0.2
+RespawnJumpMeters = 100.0
+MaxSamplesPerLevel = 480
+MaxLeaderboardEntries = 8
+DebugLogging = false
+DisabledLeaderboardSources =
+```
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `Enable` | true | 总开关；关闭后不记录、不加载、不显示。 |
+| `PBPath` | `subsegment/pb` | 相对路径基于 `<config>/TwilightTimer/` 解析；绝对路径也可用。写入 PB 时自动创建目录。 |
+| `LoadPath` | `subsegment/load` | 玩家手动放置的采样目录。插件加载时会自动创建该目录，以便直接放入参考采样。 |
+| `ToggleKey` | `Tab` | 共享排行榜循环切换键：关闭 → 分段对比 → 标记 → 关闭。 |
+| `MultiProject` | `Any%` | 多关实时对比的初始子项目（`Aztec%`/`Dark%`/`Steam%`/`Any%`）。当前局内可沿包含关系自动升级（`Aztec%`→`Dark%`→`Steam%`→`Any%`），不写回配置；若所选项目完全没有数据，则回退到有数据的最小项目（仅当前局内）。PB 写入仍按实际最后完成关卡判定。 |
+| `PlaneRadius` | `50.0` | 虚拟检测平面半径（米）。 |
+| `MinMove` | `0.5` | 最小采样位移；低于该值的位移置零，且不建平面。 |
+| `SampleInterval` | `1.0` | 游戏时间采样间隔（秒）。 |
+| `QuietSettleSeconds` | `0.5` | 穿越候选的静默结算窗（秒）。 |
+| `PlaneDebounceSeconds` | `0.2` | 同一平面的穿越防抖窗口（秒）。 |
+| `RespawnJumpMeters` | `100.0` | 轨迹连续性阈值；超过视为失败折返，不做陈旧回路抑制。 |
+| `MaxSamplesPerLevel` | `480` | 单关内累计采样条数上限。当下一条采样将超过上限时，本关立即停止采样并清空当前内存中的采样缓冲，该关不计入 PB。 |
+| `MaxLeaderboardEntries` | `8` | 排行榜最多显示项数。 |
+| `DebugLogging` | false | 详细 subsegment 日志（采样/加载/平面/结算/PB 写入）。 |
+| `DisabledLeaderboardSources` | *(空)* | 从排行榜隐藏的资料 display id（逗号分隔；`PB` 表示 PB 项，其余为 `LoadPath` 下各顶层文件夹名）。空表示全部显示。 |
+
+共享排行榜 HUD 的外观与显示模式（`font_size`、`offset_x`、`offset_y`、颜色、`mode`、`markers_time_mode`）位于 `layout.ini` 的 `[leaderboard]`，不在这里。`settings.ini` 中旧的 `Hud*`、`LeaderboardMode`、`LeaderboardTimeMode` 键会在下次写入时自动迁移到 `layout.ini` 并从 `settings.ini` 删除。
+
+## settings.ini — [Markers]
+
+自 R10 起，标记数据与标记模块由 `settings.ini` 中的 `[Markers]` 节配置（同一容错读写器）：
+
+```ini
+[Markers]
+Enable = true
+EditMode = false
+Path = markers
+DebugLogging = false
+OverlayFillColor = 3F7FFF66
+OverlayLabelColor = FFFFFFFF
+```
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `Enable` | true | 总开关；关闭后不触发、不写 PB、不显示标记排行榜与可视化。 |
+| `EditMode` | false | 标记编辑模式：开启游戏内可视化（R10.6）、计时器 HUD 底部的醒目提示及其下方的 XYZ 轴向指示器，并解锁面板编辑控件。持久化，重启后保留。 |
+| `Path` | `markers` | 标记定义与 PB 文件目录（`<config>/TwilightTimer/markers`）。相对路径基于 `<config>/TwilightTimer/` 解析；绝对路径也可用。 |
+| `DebugLogging` | false | 详细标记日志（关卡 key、标记数、触发、物体解析、PB 写入）。 |
+| `OverlayFillColor` | `3F7FFF66` | 范围立方体与抓取物体高亮的填充色（含透明度）。 |
+| `OverlayLabelColor` | `FFFFFFFF` | 编辑模式叠加层中标记名称文字的颜色。 |
+
+排行榜的时间显示设置（`markers_time_mode`）属于共享排行榜 HUD 配置，位于 `layout.ini` 的 `[leaderboard]`，不在这里。
+
+标记数据文件位于 `<config>/TwilightTimer/markers/{关卡}/{类别}.json`（关卡 key 与 subsegment IL 目录同规则：BuiltIn/EditorPick 用英文本地化关卡名，工坊用数字 id，本地工坊无 id 时用关卡文件夹名；类别键规则见 R8.2.4）。**没有加载/导入目录——标记只保存你自己的 PB。**
+
+## settings.ini — [Presets]
+
+自 R11 起，当前选中的预设作为普通配置项保存在 `settings.ini`：
+
+```ini
+[Presets]
+Current = default
+```
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `Current` | `default` | 当前选中的预设名。随其它配置一起保存 / 加载。 |
+
+## presets/
+
+自 R11 起，布局 + 标记预设位于 `<config>/TwilightTimer/presets/`：
+
+```
+presets/
+  default/
+    layout.ini
+    markers/
+  <name>/
+    layout.ini
+    markers/
+```
+
+一个预设是 `layout.ini` 与整个 `markers/` 目录（标记定义 **和** PB 记录）的快照。首次加载或从旧版本升级时，插件会用当前配置创建 `default` 预设并选中它；`default` 不可删除。预设管理入口在设置面板的 **常规** 标签页（见 [PANEL.md](PANEL.md)）。
 
 ## lang/*.txt
 

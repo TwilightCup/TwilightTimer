@@ -18,12 +18,14 @@ TwilightTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧
   游戏时间同时停表；默认显示在游戏总时间下方且始终在后台活跃，可在设置中切换显示。
 - **标准风格面板** —— 可编排的有序行、逐字符双色渐变(含透明度)、屏幕任意位置的自定义
   文本、可拖动面板。
-- **类别与标签** —— 通过标签定义速通规则集。内置: `检查点`、`无检查点`、`禁跳`、`旁白`。
+- **类别与标签** —— 通过标签定义速通规则集。内置: `检查点`、`无检查点`、`禁跳`、`旁白`、`Glitchless`、`NoEC`。
   通过 `ITagRule` 接口可扩展。
 - **检查点合规** —— 跳关检测(内置例外表)与终点检查点校验。
 - **成绩有效性检测** —— 作弊码、游戏变速、游戏时钟篡改；区分"不可原谅"与"可原谅"标记。
-- **一键重试** —— 瞬间重启当前关卡。
-- **本地化** —— 社区可翻译的 `键名:译文` 文件；英文为内置基准；附带简体中文示例翻译。
+- **一键重试** —— 瞬间重启当前关卡，或通过英文名 / 创意工坊 ID 指定要重启/进入的关卡（菜单中也可直接进入）。
+- **标记** —— 每个关卡的手动触发点（范围触发 / 存档点触发 / 抓取物体触发），记录每个标记首次触发的分段时间并与该关卡自身的本地 PB 对比；排行榜 HUD 可切换到"最新在上"的标记 feed（绝对或相对时间），编辑模式会在游戏中显示 3D 立方体与标签。
+- **本地化** —— 社区可翻译的 `键名:译文` 文件；英文为内置基准；附带简体中文示例翻译。其它插件注册到设置面板的标签页也可跟随 TwilightTimer 的语言选择。
+- **游戏内测试控制台** —— 插件向游戏自带的开发者控制台（`~` / `F1`）注册了 `twi ...` 命令，所有功能都可在游戏内查看与测试。详见 [TESTS.md](TESTS.md)。
 
 完整规格见 [REQUIREMENTS.md](REQUIREMENTS.md)。
 
@@ -59,8 +61,9 @@ TwilightTimer 维护一个精确的 **游戏时间** 时钟（以游戏物理帧
 dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
-构建会从默认的 Steam 安装路径解析游戏 / BepInEx 的 DLL 引用(见 `Directory.Build.props`)。
-若 Steam 库不在默认路径或使用其他平台，请通过环境变量覆盖路径:
+构建会从 `GAME_MANAGED` / `BEPINEX_CORE` 解析游戏 / BepInEx 的 DLL 引用。
+本机的这两个路径写在被 git 忽略的 `Directory.Build.user.props` 中；在其他机器上或
+Steam 库不在默认路径时，请通过环境变量设置:
 
 ```bash
 GAME_MANAGED="/路径/Human_Data/Managed" \
@@ -68,7 +71,7 @@ BEPINEX_CORE="/路径/BepInEx/core" \
 dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
-产物为 `src/TwilightTimer/bin/Debug/netstandard2.0/TwilightTimer.dll`。
+产物为 `src/TwilightTimer/bin/Debug/netstandard2.0/TwilightTimer.dll`，另附版本化副本 `TwilightTimer-v{version}.dll` 用于发布。
 
 ## 配置
 
@@ -102,8 +105,9 @@ dotnet build src/TwilightTimer/TwilightTimer.csproj
 - [类别与标签](docs/zh/CATEGORIES.md) · [检查点规则](docs/zh/CHECKPOINTS.md)
 - [配置](docs/zh/CONFIG.md) · [面板](docs/zh/HUD.md)
 - [设置面板](docs/zh/PANEL.md)
-- [本地化](docs/zh/LOCALIZATION.md) · [扩展(自定义标签)](docs/zh/EXTENDING.md)
+- [本地化](docs/zh/LOCALIZATION.md) · [扩展(自定义标签 & 设置面板标签页)](docs/zh/EXTENDING.md)
 - [旁白检测](docs/zh/VOICELINE.md)
+- [测试(游戏内控制台)](../TESTS.md)
 
 ## 许可证
 

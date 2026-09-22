@@ -88,7 +88,7 @@ live state.
 
 ## In-match leaderboard
 
-`Hud/LeaderboardHud.cs` renders a real-time leaderboard during match rounds,
+`Hud/MatchLeaderboardHud.cs` renders a real-time leaderboard during match rounds,
 anchored at the middle of the left screen edge in the timer's own style
 (see [HUD.md](HUD.md) for formats/sorting/config). The data direction is the
 reverse of the provider: TwilightCore owns the server-fed state and this

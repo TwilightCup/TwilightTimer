@@ -1,180 +1,294 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace TwilightTimer
 {
     /// <summary>
-    /// The in-match real-time leaderboard, rendered in the timer's own style
-    /// (plain bold text, per-character gradient, dynamic OS font, no window
-    /// chrome) and anchored at the middle of the screen's left edge —
-    /// vertically centred, so it never competes with the top-left timer
-    /// stack. One row per player; row content follows the round's project
-    /// type (see <see cref="LeaderboardState"/>):
-    ///
-    ///   MULTI:  {name} {currentLevelName} {totalAtArrival, seconds only}
-    ///   SINGLE: {name} {score}
-    ///
-    /// Rows are sorted progress-first. The name is drawn in the seat colour
-    /// (PLAYER_A blue / PLAYER_B red, configurable); the rest of the row
-    /// keeps the default gradient. Transition mode (TwilightCore's
-    /// leaderboard feed absent) shows the local row only, seat-unknown →
-    /// default gradient. Hidden entirely outside match rounds and behind the
-    /// ShowHud/ShowLeaderboard toggles; the keybind (default Tab, rebindable
-    /// like the other keys) flips ShowLeaderboard live.
+    /// The shared IMGUI leaderboard HUD (left side of the screen). It shows
+    /// either the subsegment reference leaderboard (R8.5) or the markers
+    /// trigger feed (R10.7), chosen by <c>LayoutModel.LeaderboardMode</c>.
+    /// The top edge is fixed at the screen center (plus the configured Y
+    /// offset) and rows extend downward as content grows. Appearance (font
+    /// size, offsets, entry colors) comes from the layout model and applies
+    /// to both modes; the mode-cycle key (<c>SubsegmentToggleKey</c>) lives
+    /// here and cycles: hidden → Subsegment → Markers → hidden.
     /// </summary>
-    public class LeaderboardHud : MonoBehaviour
+    public sealed class LeaderboardHud : MonoBehaviour
     {
+        public static LeaderboardHud Instance { get; private set; }
+
+        private bool _visible = true;
         private GUIStyle _rowStyle;
         private Font _font;
         private int _appliedFontSize = -1;
 
+        /// <summary>Whether the leaderboard is currently shown (R8.5.1.2).</summary>
+        public bool Visible => _visible;
+
         private void Awake()
         {
+            Instance = this;
             _rowStyle = new GUIStyle
             {
-                fontSize = 18,
+                fontSize = 16,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.UpperLeft,
-                richText = false,
-                // White base so GUI.color carries the per-character gradient
-                // unchanged (final text color = GUI.color * textColor).
                 normal = { textColor = Color.white },
             };
         }
 
-        private void Update()
+        private void OnDestroy()
         {
-            // Main-thread poll of TwilightCore's snapshot feed (no-op in
-            // transition mode). OnGUI may fire multiple times per frame
-            // (layout+repaint passes) — poll once here instead.
-            LeaderboardFeed.Poll();
+            if (Instance == this) Instance = null;
+        }
 
-            // Show/hide keybind (default Tab), mirroring the engine's keybind
-            // handling: always active except while the settings panel is open
-            // (so rebinding/typing can't flip it). Toggling persists to disk
-            // like the other keybinds' settings do.
+        /// <summary>
+        /// Cycle the leaderboard through hidden → Subsegment → Markers → hidden.
+        /// When turning it back on from hidden, it always starts in Subsegment
+        /// mode; while visible it switches between the two content modes.
+        /// </summary>
+        public void CycleMode()
+        {
             var cfg = ConfigService.Instance;
             if (cfg == null) return;
-            if (SettingsPanel.Instance != null && SettingsPanel.Instance.IsVisible) return;
-            if (Input.GetKeyDown(cfg.Settings.LeaderboardKey))
+
+            if (!_visible)
             {
-                cfg.Settings.ShowLeaderboard = !cfg.Settings.ShowLeaderboard;
-                cfg.SaveSettings();
+                _visible = true;
+                cfg.Layout.LeaderboardMode = "Subsegment";
+                Plugin.Logger.LogInfo("TwilightTimer: leaderboard shown in Subsegment mode.");
+                return;
+            }
+
+            bool markersMode = string.Equals(cfg.Layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase);
+            if (markersMode)
+            {
+                _visible = false;
+                Plugin.Logger.LogInfo("TwilightTimer: leaderboard hidden.");
+            }
+            else
+            {
+                cfg.Layout.LeaderboardMode = "Markers";
+                Plugin.Logger.LogInfo("TwilightTimer: leaderboard switched to Markers mode.");
+            }
+        }
+
+        /// <summary>
+        /// Show or hide the leaderboard without toggling if it is already in the
+        /// requested state. Used by the in-game dev console.
+        /// </summary>
+        public void SetVisible(bool visible)
+        {
+            if (_visible == visible)
+                return;
+            _visible = visible;
+            if (_visible && ConfigService.Instance != null
+                && string.IsNullOrEmpty(ConfigService.Instance.Layout.LeaderboardMode))
+            {
+                ConfigService.Instance.Layout.LeaderboardMode = "Subsegment";
+            }
+        }
+
+        /// <summary>
+        /// Switch the leaderboard to a content mode ("Subsegment" or "Markers")
+        /// and make sure it is visible. Used by the in-game dev console.
+        /// </summary>
+        public void SetMode(string mode)
+        {
+            if (string.IsNullOrEmpty(mode))
+                return;
+            var cfg = ConfigService.Instance;
+            if (cfg != null)
+            {
+                if (string.Equals(mode, "Markers", StringComparison.OrdinalIgnoreCase))
+                    cfg.Layout.LeaderboardMode = "Markers";
+                else if (string.Equals(mode, "Subsegment", StringComparison.OrdinalIgnoreCase))
+                    cfg.Layout.LeaderboardMode = "Subsegment";
+            }
+            _visible = true;
+        }
+
+        private void EnsureFont(int size)
+        {
+            if (size <= 0) size = 16;
+            if (_font != null && _appliedFontSize == size) return;
+            try
+            {
+                _font = Font.CreateDynamicFontFromOSFont(new[]
+                {
+                    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+                    "Noto Sans CJK", "Heiti SC", "Arial Unicode MS", "Arial",
+                }, size);
+                _appliedFontSize = size;
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Logger.LogWarning($"TwilightTimer: leaderboard dynamic font creation failed: {ex.Message}");
+                _font = null;
             }
         }
 
         private void OnGUI()
         {
+            if (!_visible) return;
             var cfg = ConfigService.Instance;
             if (cfg == null) return;
 
-            // The ShowHud master toggle gates the whole timer HUD family;
-            // ShowLeaderboard is the per-component switch.
-            if (!cfg.Settings.ShowHud || !cfg.Settings.ShowLeaderboard) return;
-            if (!LeaderboardState.Visible) return;
-
-            var layout = cfg.Layout;
-            int size = layout.LeaderboardFontSize > 0 ? layout.LeaderboardFontSize : layout.FontSize;
-            HudFont.EnsureDynamic(ref _font, ref _appliedFontSize, size);
-            if (_font != null && _rowStyle.font != _font) _rowStyle.font = _font;
-            if (_rowStyle.fontSize != size) _rowStyle.fontSize = size;
-
-            var rows = LeaderboardState.BuildRows();
-            if (rows.Count == 0) return;
-
-            // Build the line segments first, measure the block, then draw
-            // vertically centred on the left edge.
-            var lines = new List<RowLines>(rows.Count);
-            float widest = 0f, blockHeight = 0f;
-            foreach (var row in rows)
-            {
-                var segs = BuildSegments(row);
-                float w = 0f;
-                foreach (var s in segs)
-                {
-                    var sz = _rowStyle.CalcSize(new GUIContent(s.Text));
-                    w += sz.x + s.GapAfter;
-                }
-                var lineH = _rowStyle.CalcSize(new GUIContent("Ag")).y;
-                lines.Add(new RowLines { Segments = segs, Height = lineH });
-                if (w > widest) widest = w;
-                blockHeight += lineH + 2f;
-            }
-
-            float x = layout.LeaderboardMarginX;
-            float y = Screen.height * 0.5f - blockHeight * 0.5f + layout.LeaderboardOffsetY;
-            foreach (var line in lines)
-            {
-                float cx = x;
-                foreach (var seg in line.Segments)
-                {
-                    TimerHud.DrawGradientLine(seg.Text, seg.ColorA, seg.ColorB, cx, y, _rowStyle);
-                    cx += _rowStyle.CalcSize(new GUIContent(seg.Text)).x + seg.GapAfter;
-                }
-                y += line.Height + 2f;
-            }
-        }
-
-        /// <summary>
-        /// One row as draw segments: the name (seat-coloured) followed by the
-        /// value part (default gradient). The seat pair is flat (a == b) — a
-        /// single colour reads cleaner on a short name than a gradient.
-        /// </summary>
-        private List<Segment> BuildSegments(LeaderboardRow row)
-        {
-            var cfg = ConfigService.Instance;
-            var layout = cfg.Layout;
-
-            Color nameA, nameB;
-            switch (row.Seat)
-            {
-                case LeaderboardSeat.PlayerA:
-                    nameA = nameB = layout.LeaderboardSeatAColor;
-                    break;
-                case LeaderboardSeat.PlayerB:
-                    nameA = nameB = layout.LeaderboardSeatBColor;
-                    break;
-                default:
-                    // Seat unknown (transition mode) — default gradient.
-                    nameA = layout.ColorA;
-                    nameB = layout.ColorB;
-                    break;
-            }
-
-            string value;
-            if (RoundTracker.IsSingleProject)
-            {
-                // Full precision — attempt times are the score itself.
-                value = row.SingleScoreMs.HasValue
-                    ? TimeFormatter.Format(row.SingleScoreMs.Value / 1000d)
-                    : "--:--";
-            }
+            bool markersMode = string.Equals(cfg.Layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase);
+            if (markersMode)
+                DrawMarkers(cfg);
             else
+                DrawSubsegment(cfg);
+        }
+
+        // ── Subsegment mode (R8.5) ─────────────────────────────────────────
+
+        private void DrawSubsegment(ConfigService cfg)
+        {
+            var mgr = SubsegmentManager.Instance;
+            if (mgr == null || !cfg.Settings.SubsegmentEnable) return;
+            var state = TimerCore.State;
+            if (state == null) return;
+            // During a level transition (LoadingLevel between levels) keep the
+            // previous leaderboard on screen until the next level's first
+            // settled diff refreshes it (R8.5.6.4).
+            bool inPlayableSegment = state.InSegment;
+            bool inMultiTransition = mgr.InMultiRunActive && state.GameTime > 0d;
+            bool inPreservedTransition = mgr.InPreservedTransition && state.GameTime > 0d;
+            if (!inPlayableSegment && !inMultiTransition && !inPreservedTransition) return;
+
+            var entries = mgr.Entries;
+            if (entries.Count == 0) return;
+
+            var layout = cfg.Layout;
+            int hudSize = layout.LeaderboardFontSize;
+            EnsureFont(hudSize);
+            ApplyFont();
+            _rowStyle.fontSize = hudSize;
+
+            float lineHeight = _rowStyle.CalcSize(new GUIContent("Wg")).y + 2f;
+            float x = layout.LeaderboardOffsetX;
+            // Fixed top anchor: the title/rows always start here and extend
+            // downward, so the top edge does not move as entries change.
+            float y = Screen.height * 0.5f + layout.LeaderboardOffsetY;
+
+            string title = mgr.LeaderboardTitle;
+            if (!string.IsNullOrEmpty(title))
             {
-                // MULTI total: seconds precision only (spec).
-                value = (string.IsNullOrEmpty(row.LevelName) ? "?" : row.LevelName)
-                        + " " + TimeFormatter.FormatSeconds(row.TotalAtArrivalMs / 1000d);
+                DrawLine(title, Color.white, x, y);
+                y += lineHeight;
             }
 
-            return new List<Segment>
+            foreach (var entry in entries)
             {
-                new Segment { Text = row.DisplayName, ColorA = nameA, ColorB = nameB, GapAfter = 8f },
-                new Segment { Text = value, ColorA = layout.ColorA, ColorB = layout.ColorB, GapAfter = 0f },
-            };
+                string line = entry.DisplayId + "  " + TimeFormatter.FormatSignedDiff(entry.DiffMs);
+                Color color;
+                if (!entry.DiffMs.HasValue || entry.DiffMs.Value == 0)
+                    color = layout.LeaderboardColorTie;
+                else if (entry.DiffMs.Value < 0)
+                    color = layout.LeaderboardColorFaster;
+                else
+                    color = layout.LeaderboardColorSlower;
+                DrawLine(line, color, x, y);
+                y += lineHeight;
+            }
         }
 
-        private struct Segment
+        // ── Markers mode (R10.7) ───────────────────────────────────────────
+
+        private void DrawMarkers(ConfigService cfg)
         {
-            public string Text;
-            public Color ColorA;
-            public Color ColorB;
-            public float GapAfter; // extra space after this segment (px)
+            var mgr = MarkersManager.Instance;
+            if (mgr == null || !mgr.HasFeedData) return;
+            var settings = cfg.Settings;
+            if (settings == null || !settings.MarkersEnable) return;
+            var layout = cfg.Layout;
+            var state = TimerCore.State;
+            if (state == null) return;
+
+            // R10.7.6: keep the previous feed on screen through a level
+            // transition; hide it once a run has reset (GameTime back to 0).
+            if (!state.InSegment && state.GameTime <= 0d) return;
+
+            var feed = mgr.Feed;
+            if (feed == null || feed.Count == 0) return;
+
+            bool relative = string.Equals(layout.LeaderboardMarkersTimeMode, "Relative", System.StringComparison.OrdinalIgnoreCase);
+
+            int hudSize = layout.LeaderboardFontSize;
+            EnsureFont(hudSize);
+            ApplyFont();
+            _rowStyle.fontSize = hudSize;
+
+            string title = mgr.LeaderboardTitle;
+            bool hasTitle = !string.IsNullOrEmpty(title);
+            float lineHeight = _rowStyle.CalcSize(new GUIContent("Wg")).y + 2f;
+            float x = layout.LeaderboardOffsetX;
+            // Fixed top anchor: the title/rows always start here and extend
+            // downward, so adding a new feed row does not move the top edge.
+            float y = Screen.height * 0.5f + layout.LeaderboardOffsetY;
+
+            if (hasTitle)
+            {
+                DrawLine(title, Color.white, x, y);
+                y += lineHeight;
+            }
+
+            // Newest trigger on top (R10.7.4): the feed is stored oldest-first.
+            for (int i = feed.Count - 1; i >= 0; i--)
+            {
+                var row = feed[i];
+                if (row == null) continue;
+                long? pb = mgr.PbTimeOf(row.MarkerId);
+                long diff = pb.HasValue ? row.TMs - pb.Value : 0L;
+
+                string value;
+                Color color;
+                if (relative)
+                {
+                    if (pb.HasValue)
+                    {
+                        value = TimeFormatter.FormatSignedDiff(diff);
+                        color = ToneColor(layout, diff);
+                    }
+                    else
+                    {
+                        value = "--";
+                        color = layout.LeaderboardColorTie;
+                    }
+                }
+                else
+                {
+                    // Absolute segment time (R10.7.3); the color still reflects
+                    // ahead/behind vs PB (R10.7.5).
+                    value = TimeFormatter.Format(row.TMs / 1000.0);
+                    color = pb.HasValue ? ToneColor(layout, diff) : layout.LeaderboardColorTie;
+                }
+
+                DrawLine(row.Name + ": " + value, color, x, y);
+                y += lineHeight;
+            }
         }
 
-        private struct RowLines
+        private static Color ToneColor(LayoutModel layout, long diff)
         {
-            public List<Segment> Segments;
-            public float Height;
+            if (diff < 0) return layout.LeaderboardColorFaster;
+            if (diff > 0) return layout.LeaderboardColorSlower;
+            return layout.LeaderboardColorTie;
+        }
+
+        private void ApplyFont()
+        {
+            if (_font == null) return;
+            _rowStyle.font = _font;
+            _rowStyle.fontSize = _appliedFontSize > 0 ? _appliedFontSize : 16;
+        }
+
+        private void DrawLine(string text, Color color, float x, float y)
+        {
+            _rowStyle.normal.textColor = color;
+            GUI.Label(new Rect(x, y, 600f, 28f), text, _rowStyle);
         }
     }
 }

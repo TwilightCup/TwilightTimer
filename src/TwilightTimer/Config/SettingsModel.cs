@@ -17,6 +17,16 @@ namespace TwilightTimer
         public bool RestartClearsForgivable = false; // R5.4.3 — pause-menu Restart clears forgivable flags (default off); the one-key retry always clears them (R5.4.2, fixed)
         public float RetryMinDwell = 0.5f;        // R6 minimum empty-scene dwell (seconds)
 
+        // R6.5: optional one-key retry target override. When enabled, retry
+        // goes to the level named here (English localized name, case-insensitive)
+        // or to a Workshop level by numeric id, instead of the current-level /
+        // campaign-start target. RetryTargetInvalidHint is a transient HUD flag
+        // (never persisted) that is shown when RetryAction cannot resolve the
+        // configured override.
+        public bool RetryLevelOverrideEnable = false;
+        public string RetryLevelOverride = "";
+        public bool RetryTargetInvalidHint;
+
         // Note: there are no user-facing validity/anti-cheat options. The
         // cheat/speed/drift detectors (R5.1) are always on with hardcoded
         // thresholds — none may be tuned or disabled by the player.
@@ -29,6 +39,16 @@ namespace TwilightTimer
         // shown by default (below Game Time in the default layout); this setting
         // controls its HUD visibility.
         public bool ShowRealTime = true;
+
+        // Wake Up time is a per-level stat: the time from a wake-up measurement
+        // start to the local player leaving the soft/spawn state. By default the
+        // measurement restarts on each player respawn / pause-menu checkpoint
+        // load / level restart. When OnlyRecordFirstWakeUpTime is enabled, it
+        // keeps the original behavior: only the first wake-up after a level
+        // starts is measured. Shown in the right-hand column (the one that also
+        // holds Last Run).
+        public bool ShowWakeUpTime = true;
+        public bool OnlyRecordFirstWakeUpTime = false;
 
         // Move the game's own top-right Loading/Saving progress indicator to
         // the top-center of the screen (default off).
@@ -45,15 +65,70 @@ namespace TwilightTimer
         public KeyCode MenuKey = KeyCode.Home;
         public KeyCode LeaderboardKey = KeyCode.Tab;
 
+        // ── Subsegment (R8) ─────────────────────────────────────────────
+        public bool SubsegmentEnable = true;
+        public string SubsegmentPBPath = "subsegment/pb";
+        public string SubsegmentLoadPath = "subsegment/load";
+        public KeyCode SubsegmentToggleKey = KeyCode.Tab;
+        public string SubsegmentMultiProject = "Any%";
+        public float SubsegmentPlaneRadius = 50f;
+        public float SubsegmentMinMove = 0.5f;
+        public float SubsegmentSampleInterval = 1f;
+        public float SubsegmentQuietSettleSeconds = 0.5f;
+        public float SubsegmentPlaneDebounceSeconds = 0.2f;
+        public float SubsegmentRespawnJumpMeters = 100f;
+        public int SubsegmentMaxSamplesPerLevel = 480;
+        public int SubsegmentMaxLeaderboardEntries = 8;
+        public bool SubsegmentDebugLogging = false;
+
+        // Subsegment sources that are hidden from the leaderboard (denylist).
+        // The PB entry has the id "PB"; each top-level folder under LoadPath is
+        // identified by its folder name. Empty string means everything is shown.
+        public string SubsegmentDisabledSources = "";
+
+        // ── Markers (R10) ──────────────────────────────────────────────
+        public bool MarkersEnable = true;
+        public bool MarkersEditMode = false;
+        public string MarkersPath = "markers";
+        public bool MarkersDebugLogging = false;
+
+        // Marker overlay appearance (R10.6.1/2): range-cube fill color (with
+        // alpha) and the marker-name label color.
+        public Color MarkersOverlayFillColor = GradientText.ParseColor("3F7FFF66", new Color(0.25f, 0.5f, 1f, 0.4f));
+        public Color MarkersOverlayLabelColor = Color.white;
+
+        // ── Presets (R11) ───────────────────────────────────────────────
+        // The currently selected preset. The selection itself is a normal config
+        // item so it survives restarts; there is intentionally NO separate
+        // "presets initialized" flag (first-load/upgrade is detected by the
+        // presence of the presets directory / default preset).
+        public string CurrentPreset = PresetStore.DefaultPresetName;
+
         private const string Section = "settings";
+        private const string SubsegmentSection = "Subsegment";
+        private const string MarkersSection = "Markers";
+        private const string PresetsSection = "Presets";
 
         public void Load()
         {
             foreach (var p in PersistenceService.Read(PersistenceService.PathFor("settings.ini")))
             {
-                if (p.Section != Section)
-                    continue;
-                Apply(p.Key, p.Value);
+                if (p.Section == Section)
+                {
+                    Apply(p.Key, p.Value);
+                }
+                else if (p.Section == SubsegmentSection)
+                {
+                    ApplySubsegment(p.Key, p.Value);
+                }
+                else if (p.Section == MarkersSection)
+                {
+                    ApplyMarkers(p.Key, p.Value);
+                }
+                else if (p.Section == PresetsSection)
+                {
+                    ApplyPresets(p.Key, p.Value);
+                }
             }
         }
 
@@ -66,9 +141,13 @@ namespace TwilightTimer
                     case "auto_reset": AutoReset = ParseBool(value, AutoReset); break;
                     case "restart_clears_forgivable": RestartClearsForgivable = ParseBool(value, RestartClearsForgivable); break;
                     case "retry_min_dwell": RetryMinDwell = ParseFloat(value, RetryMinDwell); break;
+                    case "retry_level_override_enabled": RetryLevelOverrideEnable = ParseBool(value, RetryLevelOverrideEnable); break;
+                    case "retry_level_override": RetryLevelOverride = value; break;
                     case "show_hud": ShowHud = ParseBool(value, ShowHud); break;
                     case "show_leaderboard": ShowLeaderboard = ParseBool(value, ShowLeaderboard); break;
                     case "show_real_time": ShowRealTime = ParseBool(value, ShowRealTime); break;
+                    case "show_wake_up_time": ShowWakeUpTime = ParseBool(value, ShowWakeUpTime); break;
+                    case "only_record_first_wake_up_time": OnlyRecordFirstWakeUpTime = ParseBool(value, OnlyRecordFirstWakeUpTime); break;
                     case "center_loading_saving": CenterLoadingSaving = ParseBool(value, CenterLoadingSaving); break;
                     case "language": CurrentLang = value; break;
                     case "reset_key": ResetKey = ParseKeyCode(value, ResetKey); break;
@@ -86,6 +165,91 @@ namespace TwilightTimer
             }
         }
 
+        private void ApplySubsegment(string key, string value)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "Enable": SubsegmentEnable = ParseBool(value, SubsegmentEnable); break;
+                    case "PBPath": SubsegmentPBPath = value; break;
+                    case "LoadPath": SubsegmentLoadPath = value; break;
+                    case "ToggleKey": SubsegmentToggleKey = ParseKeyCode(value, SubsegmentToggleKey); break;
+                    case "MultiProject": SubsegmentMultiProject = value; break;
+                    case "PlaneRadius": SubsegmentPlaneRadius = ParseFloat(value, SubsegmentPlaneRadius); break;
+                    case "MinMove": SubsegmentMinMove = ParseFloat(value, SubsegmentMinMove); break;
+                    case "SampleInterval": SubsegmentSampleInterval = ParseFloat(value, SubsegmentSampleInterval); break;
+                    case "QuietSettleSeconds": SubsegmentQuietSettleSeconds = ParseFloat(value, SubsegmentQuietSettleSeconds); break;
+                    case "PlaneDebounceSeconds": SubsegmentPlaneDebounceSeconds = ParseFloat(value, SubsegmentPlaneDebounceSeconds); break;
+                    case "RespawnJumpMeters": SubsegmentRespawnJumpMeters = ParseFloat(value, SubsegmentRespawnJumpMeters); break;
+                    case "MaxSamplesPerLevel": SubsegmentMaxSamplesPerLevel = ParseInt(value, SubsegmentMaxSamplesPerLevel); break;
+                    case "MaxLeaderboardEntries": SubsegmentMaxLeaderboardEntries = ParseInt(value, SubsegmentMaxLeaderboardEntries); break;
+                    case "DebugLogging": SubsegmentDebugLogging = ParseBool(value, SubsegmentDebugLogging); break;
+                    case "DisabledLeaderboardSources": SubsegmentDisabledSources = value; break;
+                    case "HudFontSize":
+                    case "HudOffsetX":
+                    case "HudOffsetY":
+                    case "HudColorFaster":
+                    case "HudColorSlower":
+                    case "HudColorTie":
+                    case "LeaderboardMode":
+                        // Legacy keys: migrated to layout.ini [leaderboard] by ConfigRepair; ignored here.
+                        break;
+                    default:
+                        Plugin.Logger.LogWarning($"TwilightTimer: settings.ini: unknown Subsegment key '{key}', ignored.");
+                        break;
+                }
+            }
+            catch
+            {
+                Plugin.Logger.LogWarning($"TwilightTimer: settings.ini: bad Subsegment value for '{key}' = '{value}', kept default.");
+            }
+        }
+
+        private void ApplyMarkers(string key, string value)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "Enable": MarkersEnable = ParseBool(value, MarkersEnable); break;
+                    case "EditMode": MarkersEditMode = ParseBool(value, MarkersEditMode); break;
+                    case "Path": MarkersPath = value; break;
+                    case "DebugLogging": MarkersDebugLogging = ParseBool(value, MarkersDebugLogging); break;
+                    case "LeaderboardTimeMode":
+                        // Legacy key: migrated to layout.ini [leaderboard] by ConfigRepair; ignored here.
+                        break;
+                    case "OverlayFillColor": MarkersOverlayFillColor = GradientText.ParseColor(value, MarkersOverlayFillColor); break;
+                    case "OverlayLabelColor": MarkersOverlayLabelColor = GradientText.ParseColor(value, MarkersOverlayLabelColor); break;
+                    default:
+                        Plugin.Logger.LogWarning($"TwilightTimer: settings.ini: unknown Markers key '{key}', ignored.");
+                        break;
+                }
+            }
+            catch
+            {
+                Plugin.Logger.LogWarning($"TwilightTimer: settings.ini: bad Markers value for '{key}' = '{value}', kept default.");
+            }
+        }
+
+        private void ApplyPresets(string key, string value)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "Current": CurrentPreset = string.IsNullOrEmpty(value) ? PresetStore.DefaultPresetName : value; break;
+                    default:
+                        Plugin.Logger.LogWarning($"TwilightTimer: settings.ini: unknown Presets key '{key}', ignored.");
+                        break;
+                }
+            }
+            catch
+            {
+                Plugin.Logger.LogWarning($"TwilightTimer: settings.ini: bad Presets value for '{key}' = '{value}', kept default.");
+            }
+        }
+
         public void Save()
         {
             var kv = new Dictionary<string, string>
@@ -93,9 +257,13 @@ namespace TwilightTimer
                 ["auto_reset"] = AutoReset ? "true" : "false",
                 ["restart_clears_forgivable"] = RestartClearsForgivable ? "true" : "false",
                 ["retry_min_dwell"] = RetryMinDwell.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["retry_level_override_enabled"] = RetryLevelOverrideEnable ? "true" : "false",
+                ["retry_level_override"] = RetryLevelOverride,
                 ["show_hud"] = ShowHud ? "true" : "false",
                 ["show_leaderboard"] = ShowLeaderboard ? "true" : "false",
                 ["show_real_time"] = ShowRealTime ? "true" : "false",
+                ["show_wake_up_time"] = ShowWakeUpTime ? "true" : "false",
+                ["only_record_first_wake_up_time"] = OnlyRecordFirstWakeUpTime ? "true" : "false",
                 ["center_loading_saving"] = CenterLoadingSaving ? "true" : "false",
                 ["language"] = CurrentLang,
                 ["reset_key"] = ResetKey.ToString(),
@@ -103,10 +271,77 @@ namespace TwilightTimer
                 ["menu_key"] = MenuKey.ToString(),
                 ["leaderboard_key"] = LeaderboardKey.ToString(),
             };
+            var sub = new Dictionary<string, string>
+            {
+                ["Enable"] = SubsegmentEnable ? "true" : "false",
+                ["PBPath"] = SubsegmentPBPath,
+                ["LoadPath"] = SubsegmentLoadPath,
+                ["ToggleKey"] = SubsegmentToggleKey.ToString(),
+                ["MultiProject"] = SubsegmentMultiProject,
+                ["PlaneRadius"] = SubsegmentPlaneRadius.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["MinMove"] = SubsegmentMinMove.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["SampleInterval"] = SubsegmentSampleInterval.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["QuietSettleSeconds"] = SubsegmentQuietSettleSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["PlaneDebounceSeconds"] = SubsegmentPlaneDebounceSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["RespawnJumpMeters"] = SubsegmentRespawnJumpMeters.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                ["MaxSamplesPerLevel"] = SubsegmentMaxSamplesPerLevel.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["MaxLeaderboardEntries"] = SubsegmentMaxLeaderboardEntries.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["DebugLogging"] = SubsegmentDebugLogging ? "true" : "false",
+                ["DisabledLeaderboardSources"] = SubsegmentDisabledSources,
+            };
+            var markers = new Dictionary<string, string>
+            {
+                ["Enable"] = MarkersEnable ? "true" : "false",
+                ["EditMode"] = MarkersEditMode ? "true" : "false",
+                ["Path"] = MarkersPath,
+                ["DebugLogging"] = MarkersDebugLogging ? "true" : "false",
+                ["OverlayFillColor"] = GradientText.ToHex(MarkersOverlayFillColor),
+                ["OverlayLabelColor"] = GradientText.ToHex(MarkersOverlayLabelColor),
+            };
+            var presets = new Dictionary<string, string>
+            {
+                ["Current"] = string.IsNullOrEmpty(CurrentPreset) ? PresetStore.DefaultPresetName : CurrentPreset,
+            };
             PersistenceService.Write(
                 PersistenceService.PathFor("settings.ini"),
-                new[] { new KeyValuePair<string, IDictionary<string, string>>(Section, kv) },
+                new[]
+                {
+                    new KeyValuePair<string, IDictionary<string, string>>(Section, kv),
+                    new KeyValuePair<string, IDictionary<string, string>>(SubsegmentSection, sub),
+                    new KeyValuePair<string, IDictionary<string, string>>(MarkersSection, markers),
+                    new KeyValuePair<string, IDictionary<string, string>>(PresetsSection, presets),
+                },
                 "TwilightTimer settings. Lines of the form 'key = value'. Bad lines are ignored.");
+        }
+
+        // ── subsegment source visibility helpers ──
+        public bool IsSubsegmentSourceEnabled(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return true;
+            foreach (var disabled in GetDisabledSubsegmentSources())
+                if (string.Equals(disabled, id, System.StringComparison.OrdinalIgnoreCase))
+                    return false;
+            return true;
+        }
+
+        public void SetSubsegmentSourceEnabled(string id, bool enabled)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            var disabled = new List<string>(GetDisabledSubsegmentSources());
+            disabled.RemoveAll(x => string.Equals(x, id, System.StringComparison.OrdinalIgnoreCase));
+            if (!enabled) disabled.Add(id);
+            disabled.Sort(System.StringComparer.OrdinalIgnoreCase);
+            SubsegmentDisabledSources = string.Join(",", disabled);
+        }
+
+        public IEnumerable<string> GetDisabledSubsegmentSources()
+        {
+            if (string.IsNullOrEmpty(SubsegmentDisabledSources)) yield break;
+            foreach (var raw in SubsegmentDisabledSources.Split(','))
+            {
+                var item = raw.Trim();
+                if (item.Length > 0) yield return item;
+            }
         }
 
         // ── parsing helpers (tolerant) ──
@@ -130,6 +365,13 @@ namespace TwilightTimer
             if (string.IsNullOrEmpty(s)) return fallback;
             return float.TryParse(s.Trim(), System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out float f) ? f : fallback;
+        }
+
+        public static int ParseInt(string s, int fallback)
+        {
+            if (string.IsNullOrEmpty(s)) return fallback;
+            return int.TryParse(s.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int i) ? i : fallback;
         }
     }
 }

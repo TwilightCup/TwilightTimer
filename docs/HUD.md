@@ -23,6 +23,31 @@ Each row renders one value:
 Rows are edited in `layout.ini` under `[rows]` (ordered by index). The panel
 height adapts to the number of rows.
 
+## Wake Up Time
+
+The right-hand column (the one that holds **Last Run**) also shows **Wake Up
+Time** when enabled. By default it is the time from the most recent
+wake-up-relevant moment to the first time the local player leaves the
+soft/spawn state (`Spawning` / `Unconscious` / `Dead`). The measurement
+restarts whenever the player respawns (e.g. after a fall), loads the current
+checkpoint from the pause menu, or restarts the level from the pause menu —
+the value then reflects how long it took to get up after that particular
+respawn. Once recorded within one measurement, later manual play-dead does not
+reset it; a new respawn/restart clears it and starts a fresh measurement.
+
+When the **Only record first wake-up time** option is enabled (visible only
+while Wake Up Time display is on), the original behavior is restored: only the
+first wake-up after a level starts is measured, and later respawns / checkpoint
+loads / level restarts do not reset the value. The value is cleared when the
+level is passed or exited.
+
+The value is formatted as `SS:mmm` (seconds and milliseconds, no minute/hour
+breakdown). When Last Run is visible, Wake Up Time is drawn as the second row in
+the same column; otherwise it appears as the only row in that column so it
+remains available during the run. Toggle it from the settings panel's Interface
+page, or set `show_wake_up_time = false` in `settings.ini`. The "only first"
+behavior is controlled by `only_record_first_wake_up_time` in the same file.
+
 ## Real Time clock
 
 Alongside the game-time rows, the HUD has a **Real Time** clock that measures
@@ -45,8 +70,8 @@ as hex, either `RRGGBB` (opaque) or `RRGGBBAA` (with alpha). Set both in
 `layout.ini` `[panel]`:
 
 ```ini
-color_a = FFD950FF   # start color (golden, fully opaque)
-color_b = FFF299FF   # end color
+color_a = FF5272FF   # start color (pink-red, fully opaque)
+color_b = FF9A72FF   # end color
 ```
 
 If both colors are equal, the text is a flat single color. Per-character alpha
@@ -114,6 +139,12 @@ panel's Interface tab.
 
 When a run is flagged invalid (R5), a red banner appears inside the panel
 listing the reason(s). See [CONFIG.md](CONFIG.md) for the validity options.
+
+The same red style is also used for an invalid **specified retry level**
+(R6.5): when the retry-target override is enabled and the configured level name
+or Workshop id cannot be resolved, pressing the retry key shows a red
+"Specified retry level is invalid" line in the timer HUD. It stays visible
+until a resolvable value is pressed with Retry or the override is turned off.
 
 ## Fonts
 

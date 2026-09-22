@@ -24,14 +24,20 @@ and is fully localizable.
 - **Standard-style HUD** — configurable ordered rows, per-character two-color
   gradient with alpha, arbitrary custom texts at any position, draggable panel.
 - **Categories & tags** — define rule sets via tags. Built-in: `Checkpoint`,
-  `NoCheckpoint`, `Jumpless`, `Voiceline`. Extensible via an `ITagRule` API.
+  `NoCheckpoint`, `Jumpless`, `Voiceline`, `Glitchless`, `NoEC`. Extensible via an
+  `ITagRule` API.
 - **Checkpoint compliance** — skip detection (with built-in exception tables)
   and final-checkpoint validation.
 - **Validity detection** — cheat codes, game-speed change, game-clock
   tampering; unforgivable vs forgivable flags.
-- **One-key retry** — instantly reload the current level.
+- **One-key retry** — instantly reload the current level, or directly enter a user-specified level by English name / Workshop ID (works from the menu too).
+- **Markers** — per-level manual trigger points (range / checkpoint / grab-object) that record each marker's first segment-time trigger and compare it against the level's own local PB; the leaderboard HUD can switch to a newest-first marker feed (absolute or relative times), and an edit mode shows 3D cubes + labels in-game.
 - **Localization** — community-translatable `key:translation` files; English is
-  the shipped base; a Simplified Chinese example is included.
+  the shipped base; a Simplified Chinese example is included. Settings-panel
+  tabs from other plugins can opt into the same language selection.
+- **In-game test console** — a `twi ...` command set is registered with the
+  game's dev console (`~` / `F1`) so every feature can be inspected and tested
+  from inside the game. See [TESTS.md](TESTS.md).
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for the full specification.
 
@@ -72,8 +78,9 @@ default, overridable via `-p:TWILIGHTCORE=`); see
 [docs/TWILIGHT_CUP.md](docs/TWILIGHT_CUP.md).
 
 The build resolves game/BepInEx DLL references from the default Steam install
-path (see `Directory.Build.props`). On a non-default Steam library or another
-platform, override the paths via environment variables:
+path (see `Directory.Build.props`), overridable via the gitignored
+`Directory.Build.user.props` or, on a non-default Steam library or another
+platform, via environment variables:
 
 ```bash
 GAME_MANAGED="/path/to/Human_Data/Managed" \
@@ -81,7 +88,8 @@ BEPINEX_CORE="/path/to/BepInEx/core" \
 dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
-The output is `src/TwilightTimer/bin/Debug/netstandard2.0/TwilightTimer.dll`.
+The output is `src/TwilightTimer/bin/Debug/netstandard2.0/TwilightTimer.dll`,
+plus a versioned copy `TwilightTimer-v{version}.dll` for releases.
 
 ## Configuration
 
@@ -117,8 +125,9 @@ saved when the panel is closed or the game exits. See [docs/CONFIG.md](docs/CONF
 - [Categories & tags](docs/CATEGORIES.md) · [Checkpoint rules](docs/CHECKPOINTS.md)
 - [Configuration](docs/CONFIG.md) · [HUD](docs/HUD.md)
 - [Settings panel](docs/PANEL.md)
-- [Localization](docs/LOCALIZATION.md) · [Extending (custom tags)](docs/EXTENDING.md)
+- [Localization](docs/LOCALIZATION.md) · [Extending (custom tags & settings tabs)](docs/EXTENDING.md)
 - [Voiceline detection](docs/VOICELINE.md)
+- [Testing (in-game console)](TESTS.md)
 
 ## License
 

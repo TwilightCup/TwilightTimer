@@ -24,6 +24,15 @@ namespace TwilightTimer
     /// (EditorPick, Workshop, a run not entered from the menu) the target is the
     /// current level, exactly as before R6.4.
     ///
+    /// <b>R6.5 user-specified target.</b> The settings panel can additionally
+    /// pin the retry target to a fixed level (by English localized name or a
+    /// Steam Workshop numeric id). When that option is enabled, it takes
+    /// precedence over both the R6.4 campaign-start target and the current-level
+    /// fallback; invalid values only show a red HUD hint and never start a retry.
+    /// If no level is active (e.g. the main menu), a valid override makes the
+    /// retry key directly launch the specified level instead of requiring an
+    /// active run.
+    ///
     /// This drives the full R6.2.1 flow (load the empty transition scene → reset
     /// the player → reload the level scene → <c>AfterLoad</c>: <c>state =
     /// PlayingLevel</c>, <c>RespawnAllPlayers</c>, <c>Level.Reset(0, 0)</c>),
@@ -57,8 +66,12 @@ namespace TwilightTimer
         /// <paramref name="host"/> runs the async reload coroutine (the engine
         /// MonoBehaviour, which is <c>DontDestroyOnLoad</c> so it survives the
         /// empty-scene transition).
+        /// <paramref name="allowWhileKeyboardCaptured"/> is used by the in-game
+        /// dev console: the console is itself a keyboard-capturing UI, so the
+        /// R6.1.2a input guard would otherwise make <c>twi retry</c> impossible.
+        /// Physical keybinds must keep the guard, so this stays opt-in.
         /// </summary>
-        public static bool TryExecute(MonoBehaviour host, RunState state, SettingsModel settings, out string notifyKey)
+        public static bool TryExecute(MonoBehaviour host, RunState state, SettingsModel settings, out string notifyKey, bool allowWhileKeyboardCaptured = false)
         {
             notifyKey = null;
 
@@ -73,8 +86,37 @@ namespace TwilightTimer
 
             var game = Game.instance;
 
+            // R6.5: optional user-specified retry target. Resolve it before the
+            // R6.1 guards so an invalid value always shows the HUD hint when the
+            // retry key is pressed, even if another guard would otherwise block
+            // the retry; and so a resolvable value always clears a pending hint.
+            // The resolved target is applied below only for the single-level
+            // retry path; R6.3 collection retries keep their own "restart the
+            // whole collection" behavior.
+            bool hasOverride = false;
+            ulong overrideLevel = 0UL;
+            WorkshopItemSource overrideType = WorkshopItemSource.NotSpecified;
+            if (settings.RetryLevelOverrideEnable)
+            {
+                if (!RetryTargetResolver.TryResolve(settings.RetryLevelOverride,
+                        out overrideLevel, out overrideType))
+                {
+                    settings.RetryTargetInvalidHint = true;
+                    notifyKey = "NOTIFY_RETRY_TARGET_INVALID";
+                    return false;
+                }
+                settings.RetryTargetInvalidHint = false;
+                hasOverride = true;
+            }
+            else
+            {
+                settings.RetryTargetInvalidHint = false;
+            }
+
             // R6.1.2a: no keyboard-capturing UI open (chat, text input, dialog).
-            if (MenuSystem.keyboardState != KeyboardState.None)
+            // The dev console is such a UI, so it must explicitly opt out of
+            // this guard when invoking the retry on the user's behalf.
+            if (!allowWhileKeyboardCaptured && MenuSystem.keyboardState != KeyboardState.None)
             {
                 notifyKey = "NOTIFY_RETRY_BLOCKED_INPUT";
                 return false;
@@ -88,15 +130,51 @@ namespace TwilightTimer
             }
 
             // R6.1.2c: not while a level is loading; and a level must be active.
-            if (game == null || game.state == GameState.LoadingLevel || game.currentLevelNumber < 0)
+            // A resolved R6.5 override is the exception: when no level is active
+            // (for example the main menu), the retry key directly launches the
+            // specified level instead of reloading the current one.
+            //
+            // A Workshop level is active whenever Game.workshopLevel is set, even
+            // if Game.currentLevelNumber was truncated to a negative int by a
+            // Steam Workshop id larger than int.MaxValue (the game itself stores
+            // it as an int). Without this, such a level could only be retried
+            // once before the guard wrongly reported "no active level".
+            bool hasActiveLevel = game != null
+                && game.state != GameState.LoadingLevel
+                && (game.currentLevelNumber >= 0 || game.workshopLevel != null);
+            if (!hasActiveLevel && !hasOverride)
             {
                 notifyKey = "NOTIFY_RETRY_BLOCKED_STATE";
                 return false;
             }
 
+            if (!hasActiveLevel)
+            {
+                if (App.instance == null || game == null)
+                {
+                    notifyKey = "NOTIFY_RETRY_BLOCKED_STATE";
+                    return false;
+                }
+                if (game.state == GameState.LoadingLevel || App.state == AppSate.LoadLevel)
+                {
+                    notifyKey = "NOTIFY_RETRY_BLOCKED_STATE";
+                    return false;
+                }
+
+                // Menu entry: no running level needs to be torn down, so launch
+                // the specified level directly. The normal Menu→LoadLevel flow
+                // starts a fresh run (R1.7.5).
+                App.instance.LaunchSinglePlayer(overrideLevel, overrideType, 0, 0);
+                notifyKey = "NOTIFY_RETRY_OVERRIDE_RESTARTED";
+                return true;
+            }
+
             // R5.4.2: always clear forgivable flags to give a clean retry
             // (fixed behavior — R5.4.3 moved the option's job elsewhere).
+            // One-key retry also clears soft flags (a retry is a fresh attempt);
+            // pause-menu restart deliberately does NOT clear them.
             state.Flags.ClearForgivable();
+            state.Flags.ClearSoftFlags();
 
             // R6.3: if a Level Collections (LC) collection run is active, delegate
             // the retry to LC's own "lc restart" command instead of reloading the
@@ -143,6 +221,8 @@ namespace TwilightTimer
                 }
                 else
                 {
+                    SubsegmentManager.Instance?.OnRetryStart();
+                    MarkersManager.Instance?.OnRetryStart();
                     notifyKey = "NOTIFY_COLLECTION_RESTARTED";
                     return true;
                 }
@@ -160,6 +240,19 @@ namespace TwilightTimer
             state.SegmentStart = 0d;
             state.RealTime = 0d;
             state.RealTimeActive = false;
+            SubsegmentManager.Instance?.OnRetryStart();
+            MarkersManager.Instance?.OnRetryStart();
+
+            // R6.5: if the user specified a retry target, re-launch exactly that
+            // level (BuiltIn/EditorPick by English name, Workshop by numeric id)
+            // instead of the R6.4 campaign-start-level / current-level decision.
+            if (hasOverride)
+            {
+                float overrideDwell = Mathf.Max(0f, settings.RetryMinDwell);
+                host.StartCoroutine(ReloadCoroutine(game, overrideLevel, overrideType, overrideDwell));
+                notifyKey = "NOTIFY_RETRY_OVERRIDE_RESTARTED";
+                return true;
+            }
 
             // R6.4: pick the retry target. During a campaign run that was
             // entered from the menu, the player wants to practice the level
@@ -171,19 +264,51 @@ namespace TwilightTimer
             // level, a run not entered from the menu, or an advance the engine
             // didn't tag — fall back to reloading the current level (the
             // pre-R6.4 behavior), preserving identical semantics for those cases.
-            int levelNumber = state.CampaignRetryLevel >= 0
-                ? state.CampaignRetryLevel
-                : game.currentLevelNumber;
-            WorkshopItemSource levelType = state.CampaignRetryLevel >= 0
+            //
+            // The campaign target only ever applies while the current level is a
+            // BuiltIn campaign level. Even if a stale value is still set from an
+            // earlier menu-entered campaign run (e.g. the player then entered an
+            // EditorPick/Workshop level from the menu), never let it redirect an
+            // EditorPick/Workshop retry to that old built-in level — always fall
+            // back to the current level (R6.4.5). TimerCore also clears
+            // CampaignRetryLevel on such menu entries; this check is a defensive
+            // guard in case a segment-start edge was ever missed.
+            bool useCampaignRetry = state.CampaignRetryLevel >= 0
+                && game.currentLevelType == WorkshopItemSource.BuiltIn;
+            ulong levelId = useCampaignRetry
+                ? (ulong)state.CampaignRetryLevel
+                : GetCurrentLevelId(game);
+            WorkshopItemSource levelType = useCampaignRetry
                 ? WorkshopItemSource.BuiltIn
                 : game.currentLevelType;
             float dwell = Mathf.Max(0f, settings.RetryMinDwell);
-            host.StartCoroutine(ReloadCoroutine(game, levelNumber, levelType, dwell));
+            host.StartCoroutine(ReloadCoroutine(game, levelId, levelType, dwell));
 
-            notifyKey = state.CampaignRetryLevel >= 0
+            notifyKey = useCampaignRetry
                 ? "NOTIFY_CAMPAIGN_RESTARTED"
                 : "NOTIFY_LEVEL_RESTARTED";
             return true;
+        }
+
+        /// <summary>
+        /// Resolve the current level's id for a retry. BuiltIn and EditorPick
+        /// levels use <c>Game.currentLevelNumber</c> directly. Workshop levels
+        /// must use the full <c>Game.workshopLevel.workshopId</c> instead: the
+        /// game stores only a truncated <c>int</c> in
+        /// <c>Game.currentLevelNumber</c>, and <c>App.LaunchSinglePlayer</c>
+        /// needs the complete ulong Workshop id to look the level up again.
+        /// </summary>
+        private static ulong GetCurrentLevelId(Game game)
+        {
+            if (game.workshopLevel != null
+                && game.workshopLevel.workshopId != 0UL
+                && (game.currentLevelType == WorkshopItemSource.Subscription
+                    || game.currentLevelType == WorkshopItemSource.LocalWorkshop))
+            {
+                return game.workshopLevel.workshopId;
+            }
+
+            return (ulong)game.currentLevelNumber;
         }
 
         /// <summary>
@@ -192,7 +317,7 @@ namespace TwilightTimer
         /// the retry → re-launch the level. The empty-scene dwell uses
         /// <c>Time.unscaledTime</c> (real time) so it is unaffected by timeScale.
         /// </summary>
-        private static IEnumerator ReloadCoroutine(Game game, int levelNumber, WorkshopItemSource levelType, float minDwell)
+        private static IEnumerator ReloadCoroutine(Game game, ulong levelNumber, WorkshopItemSource levelType, float minDwell)
         {
             // Measured from the key press (this coroutine starts the same frame).
             float start = Time.unscaledTime;
@@ -215,7 +340,7 @@ namespace TwilightTimer
             // 4. Re-launch the same level. LaunchSinglePlayer → BeginLoadLevel →
             //    LoadLevel reloads the scene (currentLevelNumber != levelNumber
             //    now) → AfterLoad (state = PlayingLevel, player reset to 0).
-            App.instance.LaunchSinglePlayer((ulong)levelNumber, levelType, 0, 0);
+            App.instance.LaunchSinglePlayer(levelNumber, levelType, 0, 0);
         }
     }
 }

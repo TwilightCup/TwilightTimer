@@ -13,9 +13,15 @@ namespace TwilightTimer
     /// </summary>
     public class TimerHud : MonoBehaviour
     {
+        private const float MarkerAxisIndicatorHeight = 38f;
+
+        /// <summary>How long a soft-flag line stays red after a new trigger.</summary>
+        private const float SoftFlagFlashSeconds = 0.6f;
+
         private GUIStyle _rowStyle;
         private GUIStyle _bannerStyle;
         private GUIStyle _customStyle;
+        private GUIStyle _axisLabelStyle;
         private Font _font;
         private int _appliedFontSize = -1;
 
@@ -44,6 +50,13 @@ namespace TwilightTimer
                 alignment = TextAnchor.UpperLeft,
                 normal = { textColor = Color.white },
             };
+            _axisLabelStyle = new GUIStyle
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white },
+            };
         }
 
         /// <summary>(Re)create the dynamic OS font when the configured size changes.</summary>
@@ -57,51 +70,72 @@ namespace TwilightTimer
             var cfg = ConfigService.Instance;
             if (cfg == null) return;
 
-            // Global show/hide toggle.
-            if (!cfg.Settings.ShowHud)
-            {
-                DrawCustomTexts(cfg);
-                return;
-            }
-
             int size = cfg.Layout.FontSize;
             EnsureFont(size);
             ApplyFontToStyles(size);
 
+            // Global show/hide toggle.
+            if (!cfg.Settings.ShowHud)
+            {
+                // R10.4.2: the marker-edit-mode hint is independent of show_hud.
+                // With the timer HUD hidden there is no block to anchor to, so
+                // the hint (and its XYZ axis indicator) is drawn at the
+                // bottom-left of the screen instead.
+                float x = 12f;
+                float y = Screen.height - MarkerEditModeBlockHeight(cfg) - 12f;
+                y += DrawMarkerEditModeLine(cfg, cfg.Localization, x, y);
+                y += DrawMarkerAxisIndicator(cfg, x, y);
+                DrawCustomTexts(cfg);
+                return;
+            }
+
             float mainBlockWidth = DrawMainBlock(cfg);
 
-            DrawLastRunColumn(cfg, mainBlockWidth);
+            DrawRightColumn(cfg, mainBlockWidth);
 
             DrawCustomTexts(cfg);
         }
 
         /// <summary>
-        /// The finished-run total ("LastRun") in its own column immediately to
-        /// the right of the main timer stack (offset from the main block's widest
-        /// line, top-aligned with it). Shown only while idle — once a new run
-        /// starts timing (a segment opens), the reference disappears so it never
-        /// competes with the live timers; it comes back on the next completion.
+        /// Draw the right-hand column next to the main timer stack. The first row
+        /// is the finished-run total ("LastRun") when visible, and the second row
+        /// (or the only row when no LastRun is available) is the current level's
+        /// Wake Up time, gated by the "Show Wake Up Time" setting.
         /// </summary>
-        private void DrawLastRunColumn(ConfigService cfg, float mainBlockWidth)
+        private void DrawRightColumn(ConfigService cfg, float mainBlockWidth)
         {
             var state = TimerCore.State;
             if (state == null) return;
-            if (!state.LastRun.HasValue) return;          // nothing finished yet
-            // Hide once a *new* run starts timing — but not during the epilogue
-            // (the Credits level the game loads after the campaign finishes),
-            // which belongs to the run that just ended.
-            if (!state.InEpilogueSegment && (state.InSegment || state.GameTime > 0d))
+
+            // LastRun hides once a *new* run starts timing — but not during the
+            // epilogue (the Credits level the game loads after the campaign
+            // finishes), which belongs to the run that just ended.
+            bool showLastRun = state.LastRun.HasValue
+                && (state.InEpilogueSegment || (!state.InSegment && state.GameTime <= 0d));
+            bool showWakeUp = cfg.Settings.ShowWakeUpTime && state.WakeUpTime.HasValue;
+            if (!showLastRun && !showWakeUp)
                 return;
 
             var layout = cfg.Layout;
             var loc = cfg.Localization;
-            string line = loc.Get("TIMER_LAST_RUN") + ":  " + TimeFormatter.Format(state.LastRun);
 
             // Column gap next to the main block's widest line; top-aligned with it.
             const float gap = 24f;
             float x = layout.OffsetX + mainBlockWidth + gap;
             float y = layout.OffsetY;
-            DrawGradientLine(line, layout.ColorA, layout.ColorB, x, y, _rowStyle);
+
+            if (showLastRun)
+            {
+                string line = loc.Get("TIMER_LAST_RUN") + ":  " + TimeFormatter.Format(state.LastRun);
+                DrawGradientLine(line, layout.ColorA, layout.ColorB, x, y, _rowStyle);
+                y += _rowStyle.CalcSize(new GUIContent(line)).y + 2f;
+            }
+
+            if (showWakeUp)
+            {
+                string line = loc.Get("TIMER_WAKE_UP_TIME") + ":  " + TimeFormatter.FormatWakeUp(state.WakeUpTime);
+                DrawGradientLine(line, layout.ColorA, layout.ColorB, x, y, _rowStyle);
+            }
         }
 
         /// <summary>
@@ -121,7 +155,7 @@ namespace TwilightTimer
             float widest = 0f;
 
             // Each configured row. LastRun is NOT drawn here — it renders in its
-            // own right-hand column (see DrawLastRunColumn) so the finished-run
+            // own right-hand column (see DrawRightColumn) so the finished-run
             // total doesn't sit in the same column as the live timers. RealTime
             // is a regular row type but is additionally gated by the ShowRealTime
             // settings toggle.
@@ -155,15 +189,16 @@ namespace TwilightTimer
 
             // Current rule tags: one line right under the timer rows listing the
             // enabled tags (localized). Skipped when none are enabled. Rendered
-            // before the tag extras and the invalid banner so the banner — the
-            // most important line — always stays last.
+            // before the tag extras and the invalid banner; the marker-edit-mode
+            // block is drawn last, at the very bottom of the HUD.
             y += DrawTagsLine(cfg, loc, layout, x, y);
 
             // Voiceline / checkpoint extras (R3.3.3, R3.6.3) for the active category.
             y += DrawTagExtras(cfg, state, loc, x, y);
 
-            // Invalid banner (R5.3.2).
-            if (state.Flags.IsInvalid)
+            // Invalid banner (R5.3.2). Soft flags are NOT part of this banner;
+            // they render on their own lines in normal HUD text color below.
+            if (state.Flags.HasHardInvalid)
             {
                 string reasons = state.Flags.FormatReasons(loc);
                 string banner = loc.Get("INVALID_RUN") + ": " + reasons;
@@ -172,6 +207,27 @@ namespace TwilightTimer
                 DrawGradientLine(banner, Color.red, new Color(1f, 0.4f, 0.4f, 1f), x, y, _bannerStyle);
                 y += _bannerStyle.CalcSize(content).y + 2f;
             }
+
+            // Soft flags: normal HUD text with a trigger count, each on its own
+            // line. A newly triggered flag flashes red for a short moment.
+            y += DrawSoftFlags(cfg, state, loc, x, y);
+
+            // R6.5: show the retry-target-resolution failure in the same red
+            // banner style as a run invalid hint. It stays visible until the
+            // override is turned off or a retry is pressed with a resolvable
+            // value.
+            if (cfg.Settings.RetryTargetInvalidHint)
+            {
+                string banner = loc.Get("HUD_INVALID_RETRY_TARGET");
+                _bannerStyle.normal.textColor = Color.red;
+                DrawGradientLine(banner, Color.red, new Color(1f, 0.4f, 0.4f, 1f), x, y, _bannerStyle);
+                y += _bannerStyle.CalcSize(new GUIContent(banner)).y + 2f;
+            }
+
+            // R10.4.2: the marker-edit-mode hint is the last line of the timer
+            // HUD, and the edit-mode XYZ axis indicator sits directly beneath it.
+            y += DrawMarkerEditModeLine(cfg, loc, x, y);
+            y += DrawMarkerAxisIndicator(cfg, x, y);
 
             return widest;
         }
@@ -188,6 +244,104 @@ namespace TwilightTimer
             return _rowStyle.CalcSize(new GUIContent(line)).y + 2f;
         }
 
+        /// <summary>
+        /// R10.4.2: one conspicuous amber line while the marker edit mode is on.
+        /// Returns the vertical space consumed (0 when not in edit mode).
+        /// </summary>
+        private float DrawMarkerEditModeLine(ConfigService cfg, LocalizationService loc, float x, float y)
+        {
+            if (cfg.Settings == null || !cfg.Settings.MarkersEnable || !cfg.Settings.MarkersEditMode)
+                return 0f;
+            string line = loc.Get("MARKER_HUD_EDIT_MODE");
+            DrawGradientLine(line, new Color(1f, 0.8f, 0.2f, 1f), new Color(1f, 0.55f, 0.1f, 1f), x, y, _rowStyle);
+            return _rowStyle.CalcSize(new GUIContent(line)).y + 2f;
+        }
+
+        /// <summary>
+        /// R10.4.2: a small XYZ axis indicator like a 3D editor's orientation
+        /// gizmo. It projects the world axes through the active camera, so it
+        /// follows the player's view angle in normal gameplay and in F8 free
+        /// roam. Returns the vertical space consumed (0 when not in edit mode).
+        /// </summary>
+        private float DrawMarkerAxisIndicator(ConfigService cfg, float x, float y)
+        {
+            if (cfg.Settings == null || !cfg.Settings.MarkersEnable || !cfg.Settings.MarkersEditMode)
+                return 0f;
+            var cam = MarkerOverlay.GetCamera();
+            if (cam == null || cam.transform == null)
+                return 0f;
+
+            const float size = 30f;
+            Vector2 origin = new Vector2(x + size * 0.5f, y + size * 0.5f);
+
+            DrawAxisLine(origin, origin + ProjectAxis(cam, Vector3.right, size), new Color(1f, 0.3f, 0.3f, 1f), "X");
+            DrawAxisLine(origin, origin + ProjectAxis(cam, Vector3.up, size), new Color(0.3f, 1f, 0.3f, 1f), "Y");
+            DrawAxisLine(origin, origin + ProjectAxis(cam, Vector3.forward, size), new Color(0.3f, 0.6f, 1f, 1f), "Z");
+
+            return MarkerAxisIndicatorHeight;
+        }
+
+        private float MarkerEditModeBlockHeight(ConfigService cfg)
+        {
+            if (cfg.Settings == null || !cfg.Settings.MarkersEnable || !cfg.Settings.MarkersEditMode)
+                return 0f;
+            string line = cfg.Localization.Get("MARKER_HUD_EDIT_MODE");
+            float height = _rowStyle.CalcSize(new GUIContent(line)).y + 2f;
+            var cam = MarkerOverlay.GetCamera();
+            if (cam != null && cam.transform != null)
+                height += MarkerAxisIndicatorHeight;
+            return height;
+        }
+
+        private static Vector2 ProjectAxis(Camera cam, Vector3 worldAxis, float size)
+        {
+            Vector3 local = cam.transform.InverseTransformDirection(worldAxis);
+            return new Vector2(local.x, -local.y) * size;
+        }
+
+        private void DrawAxisLine(Vector2 a, Vector2 b, Color color, string label)
+        {
+            var prevColor = GUI.color;
+            GUI.color = color;
+
+            Vector2 dir = b - a;
+            float len = dir.magnitude;
+            if (len > 0.5f)
+            {
+                float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+                var prevMatrix = GUI.matrix;
+                GUIUtility.RotateAroundPivot(angle, a);
+                GUI.DrawTexture(new Rect(a.x, a.y - 1.5f, len, 3f), Texture2D.whiteTexture);
+                GUI.matrix = prevMatrix;
+
+                GUI.Label(new Rect(b.x - 8f, b.y - 8f, 16f, 16f), label, _axisLabelStyle);
+            }
+
+            GUI.color = prevColor;
+        }
+
+        /// <summary>
+        /// Draw one line per active soft flag in the normal HUD text colors,
+        /// appending its trigger count ("name x3"). When a flag was triggered
+        /// within <see cref="SoftFlagFlashSeconds"/>, the whole line flashes red.
+        /// Returns the vertical space consumed.
+        /// </summary>
+        private float DrawSoftFlags(ConfigService cfg, RunState state, LocalizationService loc, float x, float y)
+        {
+            float added = 0f;
+            foreach (var soft in state.Flags.SoftFlags)
+            {
+                string line = loc.Get(InvalidReasons.LocalKey(soft.Reason)) + " x" + soft.Count;
+                bool flashing = Time.realtimeSinceStartup - soft.LastTriggerTime <= SoftFlagFlashSeconds;
+                if (flashing)
+                    DrawGradientLine(line, Color.red, new Color(1f, 0.4f, 0.4f, 1f), x, y + added, _rowStyle);
+                else
+                    DrawGradientLine(line, cfg.Layout.ColorA, cfg.Layout.ColorB, x, y + added, _rowStyle);
+                added += _rowStyle.CalcSize(new GUIContent(line)).y + 2f;
+            }
+            return added;
+        }
+
         private float DrawTagExtras(ConfigService cfg, RunState state, LocalizationService loc, float x, float y)
         {
             var tags = cfg.EnabledTags;
@@ -202,14 +356,14 @@ namespace TwilightTimer
                 added += _rowStyle.CalcSize(new GUIContent(line)).y + 2f;
             }
 
-            // Voiceline tag: green hint when all triggered (R3.6.3).
+            // Voiceline tag: show triggered/total progress (R3.6.3).
             if (tags.HasTag(TagIds.Voiceline))
             {
                 var rule = TagRuleRegistry.Instance != null ? TagRuleRegistry.Instance.Find(TagIds.Voiceline) as VoicelineTagRule : null;
-                if (rule != null && rule.Tracker != null && rule.Tracker.AllBlocksTriggered && rule.Tracker.EasterSatisfied)
+                if (rule != null && rule.Tracker != null)
                 {
-                    string line = loc.Get("VOICELINE_ALL_DONE");
-                    DrawGradientLine(line, new Color(0.3f, 1f, 0.4f, 1f), new Color(0.5f, 1f, 0.6f, 1f), x, y + added, _rowStyle);
+                    string line = loc.Get("VOICELINE_COUNT") + ":  " + rule.Tracker.TriggeredCount + "/" + rule.Tracker.TotalCount;
+                    DrawGradientLine(line, cfg.Layout.ColorA, cfg.Layout.ColorB, x, y + added, _rowStyle);
                     added += _rowStyle.CalcSize(new GUIContent(line)).y + 2f;
                 }
             }
@@ -320,6 +474,7 @@ namespace TwilightTimer
                 if (_rowStyle.font != _font) _rowStyle.font = _font;
                 if (_bannerStyle.font != _font) _bannerStyle.font = _font;
                 if (_customStyle.font != _font) _customStyle.font = _font;
+                if (_axisLabelStyle.font != _font) _axisLabelStyle.font = _font;
             }
             if (_rowStyle.fontSize != size) _rowStyle.fontSize = size;
             // The invalid banner matches the timer rows' size (the fixed smaller

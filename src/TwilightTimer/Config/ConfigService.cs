@@ -14,6 +14,15 @@ namespace TwilightTimer
 
         public static ConfigService Instance { get; private set; }
 
+        /// <summary>
+        /// Raised after <see cref="SaveSettings"/> has written every config
+        /// file. TwilightTimer subscribes the settings-tab registry to this event so
+        /// external tabs can persist their own config (R9.3); external plugins
+        /// should subscribe to <c>SettingsPanelTabRegistry.SettingsSaved</c>
+        /// instead of this internal event.
+        /// </summary>
+        internal event System.Action SettingsSaved;
+
         /// <summary>Load everything from disk; called once at boot.</summary>
         public void Load()
         {
@@ -54,6 +63,17 @@ namespace TwilightTimer
             finally
             {
                 MatchMode.RestoreMatchOverrides();
+            }
+
+            var saved = SettingsSaved;
+            if (saved != null)
+            {
+                try { saved(); }
+                catch (System.Exception ex)
+                {
+                    if (Plugin.Logger != null)
+                        Plugin.Logger.LogWarning($"TwilightTimer: config-saved handler threw: {ex.Message}");
+                }
             }
         }
 

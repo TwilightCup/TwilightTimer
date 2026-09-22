@@ -25,7 +25,7 @@ namespace TwilightTimer
     /// by crash).
     ///
     /// <see cref="Poll"/> runs on the Unity main thread (called from
-    /// LeaderboardHud.Update) and normalizes the reflection snapshot into the
+    /// MatchLeaderboardHud.Update) and normalizes the reflection snapshot into the
     /// internal DTO immediately, so no reflection objects escape this class.
     /// Any reflection failure logs one warning and permanently degrades to
     /// transition mode (never spam).
@@ -155,7 +155,7 @@ namespace TwilightTimer
 
         /// <summary>
         /// Re-read the snapshot from TwilightCore and normalize it. Main
-        /// thread only (called from LeaderboardHud.Update). Cheap: the
+        /// thread only (called from MatchLeaderboardHud.Update). Cheap: the
         /// reflection call only fetches a pre-built immutable object; the
         /// server updates at most once per level/attempt completion.
         /// </summary>

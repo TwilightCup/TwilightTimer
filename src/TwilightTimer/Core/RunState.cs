@@ -35,6 +35,28 @@ namespace TwilightTimer
         public double? LastRun;
 
         /// <summary>
+        /// Time from the current wake-up measurement start to
+        /// the local player leaving the soft/spawn state
+        /// (<c>Spawning</c> / <c>Unconscious</c> / <c>Dead</c>), or null before
+        /// that wake-up has been observed. By default the measurement restarts
+        /// on each player respawn / pause-menu checkpoint load / level restart;
+        /// with <c>OnlyRecordFirstWakeUpTime</c> it stays fixed to the first
+        /// wake-up after a level starts. Cleared when a new playable level
+        /// starts, when the level ends/exits, and on any reset — it is purely a
+        /// live per-level display value.
+        /// </summary>
+        public double? WakeUpTime;
+
+        /// <summary>
+        /// Authoritative game time at which the current Wake Up Time measurement
+        /// began. For the original "first wake-up only" mode this is the segment
+        /// start; for the default mode it is updated to each respawn/restart
+        /// moment so Wake Up Time shows how long the player took to get up after
+        /// that particular respawn.
+        /// </summary>
+        public double WakeUpMeasureStart;
+
+        /// <summary>
         /// Accumulated wall-clock time since the current run began. Unlike
         /// <see cref="GameTime"/>, this keeps advancing through level loading
         /// screens and pauses, so it represents the real time spent on the run.
@@ -173,7 +195,9 @@ namespace TwilightTimer
         /// advance (<c>PlayLevel → LoadLevel</c>, no <c>Menu</c>) does not
         /// re-trip the menu edge, so the remembered entry level survives until
         /// the run ends or a reset clears it. Only a fresh menu entry
-        /// overwrites it (starting a new campaign run from a different level).
+        /// overwrites it (starting a new campaign run from a different level);
+        /// a fresh menu entry that starts an EditorPick/Workshop/collection
+        /// level clears it back to -1 so retry falls back to the current level.
         /// </para>
         /// </summary>
         public int CampaignRetryLevel = -1;
@@ -235,6 +259,10 @@ namespace TwilightTimer
             }
             if (!keepLastRun)
                 LastRun = null;
+            // Wake Up time is a per-level live stat only; it is cleared whenever
+            // the level ends/exits and on any reset.
+            WakeUpTime = null;
+            WakeUpMeasureStart = 0d;
             RealTime = 0d;
             RealTimeActive = false;
             TimingActive = false;
@@ -274,6 +302,8 @@ namespace TwilightTimer
             CurrentLevelType = levelType;
             PrevCheckpoint = startCheckpoint;
             MaxCheckpointThisLevel = startCheckpoint;
+            WakeUpTime = null;
+            WakeUpMeasureStart = SegmentStart;
             SegmentJustEnded = false;
             LevelPassed = false;
             OnCollectionLastLevel = false;
@@ -300,6 +330,19 @@ namespace TwilightTimer
             TimingActive = false;
             InSegment = false;
             SegmentJustEnded = true;
+            WakeUpTime = null; // the level is over; do not keep showing it
+        }
+
+        /// <summary>
+        /// Clear the current Wake Up Time display and start a fresh measurement
+        /// from <paramref name="gameTime"/>. Used by the default respawn-aware
+        /// wake-up behavior; not called when "only record first wake-up time" is
+        /// enabled.
+        /// </summary>
+        public void RestartWakeUpMeasurement(double gameTime)
+        {
+            WakeUpTime = null;
+            WakeUpMeasureStart = gameTime;
         }
     }
 }
