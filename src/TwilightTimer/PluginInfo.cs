@@ -8,6 +8,6 @@ namespace TwilightTimer
     {
         public const string PLUGIN_GUID = "TwilightTimer";
         public const string PLUGIN_NAME = "TwilightTimer";
-        public const string PLUGIN_VERSION = "0.1.0";
+        public const string PLUGIN_VERSION = "0.0.0";
     }
 }
