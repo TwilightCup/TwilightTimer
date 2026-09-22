@@ -104,6 +104,8 @@ localized "You" and no seat colour.
 
 `TwilightTimerApi` is the direct-consumption surface (T1.6): EnterMatchMode /
 ExitMatchMode / StartRound / StopRound / SetRoundTags / RoundStatusString.
+In-game, `twi match ...` drives this surface synchronously; `twi sim ...` drives
+the registered `ITimerProvider` adapter through `MainThreadQueue`.
 
 ## Acceptance mapping
 

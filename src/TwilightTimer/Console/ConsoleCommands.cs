@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using HumanAPI;
 using Multiplayer;
+using TwilightCore.Timer;
 using UnityEngine;
 
 namespace TwilightTimer
@@ -119,6 +120,8 @@ namespace TwilightTimer
                     case "flags": CmdFlags(rest); break;
                     case "lc": CmdLc(rest); break;
                     case "config": CmdConfig(rest); break;
+                    case "match": CmdMatch(rest); break;
+                    case "sim": CmdSim(rest); break;
                     default:
                         Print($"Unknown TwilightTimer command: {cmd}. Type 'twi help' for usage.");
                         break;
@@ -1358,6 +1361,512 @@ namespace TwilightTimer
             }
         }
 
+        // ── Twilight Cup match / provider (fork-only features) ─────────────
+
+        private static bool _simEventLogging;
+        private static TwilightTimerProvider _simEventProvider;
+        private static Action<SegmentResult> _simSegmentCompleted;
+        private static Action<int> _simAttemptSkipped;
+        private static Action<long> _simRunCompleted;
+        private static Action<int> _simIncompleteExit;
+        private static Action<InvalidMarkInfo> _simInvalidMarked;
+
+        /// <summary>
+        /// Direct match/round testing through <see cref="TwilightTimerApi"/>
+        /// (the debug surface). These calls execute synchronously, so the next
+        /// <c>twi match status</c> reflects them immediately.
+        /// </summary>
+        private static void CmdMatch(List<string> args)
+        {
+            string action = args.Count > 0 ? args[0].ToLowerInvariant() : "status";
+            var rest = args.GetRange(1, args.Count - 1);
+            switch (action)
+            {
+                case "status":
+                    CmdMatchStatus();
+                    break;
+                case "enter":
+                    if (!TwilightTimerApi.EnterMatchMode())
+                    {
+                        Print("TimerCore/config is not ready.");
+                        return;
+                    }
+                    Print($"match mode = {(MatchMode.Active ? "active" : "inactive")}; user tag set snapshotted.");
+                    break;
+                case "exit":
+                    if (!TwilightTimerApi.ExitMatchMode())
+                    {
+                        Print("TimerCore/config is not ready.");
+                        return;
+                    }
+                    Print("match mode = inactive; user tag set restored.");
+                    break;
+                case "start":
+                    CmdMatchStart(rest);
+                    break;
+                case "resume":
+                    CmdMatchResume(rest);
+                    break;
+                case "stop":
+                    if (!TwilightTimerApi.StopRound())
+                    {
+                        Print("TimerCore/config is not ready.");
+                        return;
+                    }
+                    Print("round stopped: " + RoundTracker.StatusString());
+                    break;
+                case "tags":
+                    CmdMatchTags(rest);
+                    break;
+                case "segments":
+                    CmdRoundSegments();
+                    break;
+                case "leaderboard":
+                    Print(TwilightTimerApi.LeaderboardStatusString());
+                    break;
+                case "penalty":
+                    Print("checkpoint penalty pending = " + (MatchCheckpointPenalty.Pending ? "true" : "false"));
+                    break;
+                default:
+                    Print("Usage: twi match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]");
+                    break;
+            }
+        }
+
+        private static void CmdMatchStatus()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"match={MatchMode.Active} inRound={RoundTracker.RoundActive} roundId=\"{RoundTracker.RoundId ?? ""}\" project={(RoundTracker.IsSingleProject ? "SINGLE" : "MULTI")} retry={RoundTracker.RetryCount} nextSegment={RoundTracker.NextSegmentIndex} validAttempts={RoundTracker.ValidAttemptCount}");
+            sb.AppendLine("round: " + RoundTracker.StatusString());
+            sb.AppendLine($"checkpointPenaltyPending={MatchCheckpointPenalty.Pending}");
+            sb.AppendLine("matchLeaderboard: " + TwilightTimerApi.LeaderboardStatusString());
+            var provider = TwilightTimerProvider.Instance;
+            bool registered = provider != null && ReferenceEquals(TimerProviderRegistry.Current, provider);
+            sb.AppendLine($"provider: registered={registered} apiVersion={(provider != null ? provider.ApiVersion : 0)}");
+            sb.Append("matchTags:");
+            AppendTagList(sb, CurrentTags());
+            Print(sb.ToString());
+        }
+
+        private static void CmdMatchStart(List<string> args)
+        {
+            if (!TryParseRoundArgs(args, out string roundId, out bool single, out int retry, out List<string> tags))
+                return;
+
+            bool ok = TwilightTimerApi.StartRound(roundId, single, retry, tags);
+            if (!ok)
+            {
+                Print("StartRound failed: TimerCore/config is not ready.");
+                return;
+            }
+
+            Print($"round '{roundId}' start requested ({(single ? "SINGLE" : "MULTI")}, retry={retry}); clock starts at the next PlayingLevel edge.");
+            if (!MatchMode.Active)
+                Print("Warning: match mode is not active, so the pushed tags were ignored. Use 'twi match enter' first.");
+            Print(RoundTracker.StatusString());
+        }
+
+        private static void CmdMatchResume(List<string> args)
+        {
+            if (!TryParseRoundArgs(args, out string roundId, out bool single, out int retry, out List<string> tags))
+                return;
+
+            bool ok = RoundTracker.ResumeRound(roundId, single, retry, tags);
+            if (!ok)
+            {
+                Print("ResumeRound refused: no matching stopped round with the same round id, or the round is already active.");
+                return;
+            }
+
+            Print($"round '{roundId}' resumed (existing segments/totals preserved).");
+            Print(RoundTracker.StatusString());
+        }
+
+        private static void CmdMatchTags(List<string> args)
+        {
+            if (args.Count == 0)
+            {
+                var current = new StringBuilder();
+                current.Append("round tags:");
+                AppendTagList(current, CurrentTags());
+                Print(current.ToString());
+                return;
+            }
+
+            var tags = ParseRoundTags(args, 0);
+            if (!RoundTracker.SetRoundTags(tags))
+            {
+                Print("SetRoundTags failed: match mode is not active, or config/tag registry is not ready.");
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append("round tags set:");
+            AppendTagList(sb, tags);
+            Print(sb.ToString());
+        }
+
+        private static void CmdRoundSegments()
+        {
+            var segments = RoundTracker.GetCompletedSegments();
+            if (segments.Count == 0)
+            {
+                Print("No completed round segments.");
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"completed segments: {segments.Count}");
+            foreach (var seg in segments)
+            {
+                sb.Append($"  index={seg.Index} duration={seg.DurationMs}ms total={seg.TotalMs}ms passed={seg.Passed} skipped={seg.Skipped}");
+                if (seg.IsInvalid)
+                    sb.Append(" invalid=").Append(string.Join(", ", seg.InvalidReasons));
+                sb.AppendLine();
+            }
+            Print(sb.ToString());
+        }
+
+        /// <summary>
+        /// Provider-level testing through <see cref="TwilightTimerProvider"/> /
+        /// <see cref="TimerProviderRegistry"/>: exercises the actual
+        /// ITimerProvider adapter and its main-thread marshaling (T1/T4).
+        /// Mutations are queued; use <c>twi sim drain</c> to apply immediately
+        /// instead of waiting for the next TimerCore.Update.
+        /// </summary>
+        private static void CmdSim(List<string> args)
+        {
+            string action = args.Count > 0 ? args[0].ToLowerInvariant() : "status";
+            var rest = args.GetRange(1, args.Count - 1);
+            switch (action)
+            {
+                case "status":
+                    CmdSimStatus();
+                    break;
+                case "drain":
+                    MainThreadQueue.Drain();
+                    Print("main-thread queue drained.");
+                    break;
+                case "enter":
+                {
+                    var provider = RequireSimProvider();
+                    if (provider == null) return;
+                    provider.EnterMatchMode();
+                    Print("provider EnterMatchMode() queued; run 'twi sim drain' or wait one frame.");
+                    break;
+                }
+                case "exit":
+                {
+                    var provider = RequireSimProvider();
+                    if (provider == null) return;
+                    provider.ExitMatchMode();
+                    Print("provider ExitMatchMode() queued; run 'twi sim drain' or wait one frame.");
+                    break;
+                }
+                case "start":
+                    CmdSimStart(rest);
+                    break;
+                case "resume":
+                    CmdSimResume(rest);
+                    break;
+                case "stop":
+                {
+                    var provider = RequireSimProvider();
+                    if (provider == null) return;
+                    provider.StopRound();
+                    Print("provider StopRound() queued; run 'twi sim drain' or wait one frame.");
+                    break;
+                }
+                case "tags":
+                    CmdSimTags(rest);
+                    break;
+                case "events":
+                    CmdSimEvents(rest);
+                    break;
+                default:
+                    Print("Usage: twi sim [status|drain|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|events [on|off|status]]");
+                    break;
+            }
+        }
+
+        private static void CmdSimStatus()
+        {
+            var provider = RequireSimProvider();
+            if (provider == null) return;
+
+            var sb = new StringBuilder();
+            bool registered = ReferenceEquals(TimerProviderRegistry.Current, provider);
+            sb.AppendLine($"registered={registered} apiVersion={provider.ApiVersion} inMatchMode={provider.InMatchMode} inRound={provider.InRound}");
+            sb.AppendLine($"inSegment={provider.IsInSegment} currentSegmentMs={provider.CurrentSegmentMs} roundTotalMs={provider.RoundTotalMs} realTimeMs={provider.RealTimeMs} validAttempts={provider.ValidAttemptCount}");
+
+            var segments = provider.GetCompletedSegments();
+            sb.AppendLine($"completedSegments={segments.Count}");
+            foreach (var seg in segments)
+                sb.AppendLine($"  index={seg.Index} duration={seg.DurationMs}ms total={seg.TotalMs}ms passed={seg.Passed} skipped={seg.Skipped}");
+
+            var marks = provider.GetActiveInvalidMarks();
+            sb.Append("activeInvalidMarks:");
+            if (marks.Count == 0)
+                sb.Append(" none");
+            else
+                foreach (var mark in marks)
+                    sb.Append(' ').Append(mark.Reason).Append(mark.Unforgivable ? " (unforgivable)" : " (forgivable)");
+            sb.AppendLine();
+            sb.AppendLine("eventLogging=" + (_simEventLogging ? "on" : "off"));
+            sb.Append("matchLeaderboard: ").AppendLine(TwilightTimerApi.LeaderboardStatusString());
+            Print(sb.ToString());
+        }
+
+        private static void CmdSimStart(List<string> args)
+        {
+            var provider = RequireSimProvider();
+            if (provider == null) return;
+            if (!TryParseRoundArgs(args, out string roundId, out bool single, out int retry, out List<string> tags))
+                return;
+
+            provider.StartRound(roundId, new RoundPickInfo
+            {
+                RoundId = roundId,
+                ProjectType = single ? RoundProjectType.Single : RoundProjectType.Multi,
+                RetryCount = retry,
+                Tags = tags,
+            });
+            Print($"provider StartRound('{roundId}') queued; run 'twi sim drain' or wait one frame.");
+        }
+
+        private static void CmdSimResume(List<string> args)
+        {
+            var provider = RequireSimProvider();
+            if (provider == null) return;
+            if (!TryParseRoundArgs(args, out string roundId, out bool single, out int retry, out List<string> tags))
+                return;
+
+            var resumable = provider as IResumableTimerProvider;
+            if (resumable == null)
+            {
+                Print("The registered provider does not implement IResumableTimerProvider.");
+                return;
+            }
+
+            resumable.ResumeRound(roundId, new RoundPickInfo
+            {
+                RoundId = roundId,
+                ProjectType = single ? RoundProjectType.Single : RoundProjectType.Multi,
+                RetryCount = retry,
+                Tags = tags,
+            });
+            Print($"provider ResumeRound('{roundId}') queued; run 'twi sim drain' or wait one frame.");
+        }
+
+        private static void CmdSimTags(List<string> args)
+        {
+            var provider = RequireSimProvider();
+            if (provider == null) return;
+
+            if (args.Count == 0)
+            {
+                var current = new StringBuilder();
+                current.Append("match tags (in-memory):");
+                AppendTagList(current, CurrentTags());
+                Print(current.ToString());
+                return;
+            }
+
+            var tags = ParseRoundTags(args, 0);
+            provider.SetRoundTags(tags);
+            var sb = new StringBuilder();
+            sb.Append("provider SetRoundTags() queued:");
+            AppendTagList(sb, tags);
+            Print(sb.ToString());
+        }
+
+        private static void CmdSimEvents(List<string> args)
+        {
+            string action = args.Count > 0 ? args[0].ToLowerInvariant() : "status";
+            switch (action)
+            {
+                case "on":
+                {
+                    var provider = RequireSimProvider();
+                    if (provider == null) return;
+                    if (_simEventLogging && ReferenceEquals(_simEventProvider, provider))
+                    {
+                        Print("provider event logging is already on.");
+                        return;
+                    }
+                    UnsubscribeSimEvents();
+                    SubscribeSimEvents(provider);
+                    Print("provider event logging enabled; events are mirrored to the BepInEx log.");
+                    break;
+                }
+                case "off":
+                    if (!_simEventLogging)
+                    {
+                        Print("provider event logging is already off.");
+                        return;
+                    }
+                    UnsubscribeSimEvents();
+                    Print("provider event logging disabled.");
+                    break;
+                case "status":
+                    Print("provider event logging = " + (_simEventLogging ? "on" : "off"));
+                    break;
+                default:
+                    Print("Usage: twi sim events [on|off|status]");
+                    break;
+            }
+        }
+
+        private static TwilightTimerProvider RequireSimProvider()
+        {
+            var provider = TwilightTimerProvider.Instance;
+            if (provider == null)
+                Print("TwilightTimerProvider is not registered (not ready).");
+            return provider;
+        }
+
+        private static void SubscribeSimEvents(TwilightTimerProvider provider)
+        {
+            _simEventProvider = provider;
+            _simSegmentCompleted = result => Print($"event SegmentCompleted: index={result.Index} durationMs={result.DurationMs} totalMs={result.TotalMs} passed={result.Passed}");
+            _simAttemptSkipped = index => Print($"event AttemptSkipped: index={index}");
+            _simRunCompleted = totalMs => Print($"event RunCompleted: totalMs={totalMs}");
+            _simIncompleteExit = index => Print($"event IncompleteExit: index={index}");
+            _simInvalidMarked = mark => Print($"event InvalidMarked: reason={mark.Reason} unforgivable={mark.Unforgivable}");
+            provider.SegmentCompleted += _simSegmentCompleted;
+            provider.AttemptSkipped += _simAttemptSkipped;
+            provider.RunCompleted += _simRunCompleted;
+            provider.IncompleteExit += _simIncompleteExit;
+            provider.InvalidMarked += _simInvalidMarked;
+            _simEventLogging = true;
+        }
+
+        private static void UnsubscribeSimEvents()
+        {
+            if (_simEventProvider != null)
+            {
+                _simEventProvider.SegmentCompleted -= _simSegmentCompleted;
+                _simEventProvider.AttemptSkipped -= _simAttemptSkipped;
+                _simEventProvider.RunCompleted -= _simRunCompleted;
+                _simEventProvider.IncompleteExit -= _simIncompleteExit;
+                _simEventProvider.InvalidMarked -= _simInvalidMarked;
+            }
+            _simEventProvider = null;
+            _simSegmentCompleted = null;
+            _simAttemptSkipped = null;
+            _simRunCompleted = null;
+            _simIncompleteExit = null;
+            _simInvalidMarked = null;
+            _simEventLogging = false;
+        }
+
+        private static bool TryParseRoundArgs(List<string> args, out string roundId, out bool single, out int retry, out List<string> tags)
+        {
+            roundId = null;
+            single = false;
+            retry = 0;
+            tags = new List<string>();
+
+            if (args.Count < 2)
+            {
+                Print("Usage: <start|resume> <roundId> <single|multi> [retryCount] [tag...]");
+                return false;
+            }
+
+            roundId = args[0];
+            if (!TryParseProjectType(args[1], out single))
+            {
+                Print($"Unknown project type: {args[1]}. Use 'single' or 'multi'.");
+                return false;
+            }
+
+            int index = 2;
+            if (index < args.Count
+                && int.TryParse(args[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedRetry))
+            {
+                retry = parsedRetry;
+                index++;
+            }
+
+            tags = ParseRoundTags(args, index);
+            return true;
+        }
+
+        private static bool TryParseProjectType(string value, out bool single)
+        {
+            switch ((value ?? "").ToLowerInvariant())
+            {
+                case "single":
+                case "s":
+                case "1":
+                    single = true;
+                    return true;
+                case "multi":
+                case "m":
+                case "0":
+                    single = false;
+                    return true;
+                default:
+                    single = false;
+                    return false;
+            }
+        }
+
+        private static List<string> ParseRoundTags(List<string> args, int start)
+        {
+            var tags = new List<string>();
+            if (args == null) return tags;
+
+            for (int i = start; i < args.Count; i++)
+            {
+                foreach (var rawPart in args[i].Split(','))
+                {
+                    string part = rawPart.Trim();
+                    if (part.Length == 0) continue;
+                    if (string.Equals(part, "clear", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(part, "none", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(part, "any", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tags.Clear();
+                        continue;
+                    }
+
+                    string canonical = CanonicalTagId(part) ?? part;
+                    bool duplicate = false;
+                    foreach (var existing in tags)
+                    {
+                        if (string.Equals(existing, canonical, StringComparison.OrdinalIgnoreCase))
+                        {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate)
+                        tags.Add(canonical);
+                }
+            }
+            return tags;
+        }
+
+        private static List<string> CurrentTags()
+        {
+            var cfg = ConfigService.Instance;
+            return cfg != null && cfg.EnabledTags != null && cfg.EnabledTags.Tags != null
+                ? cfg.EnabledTags.Tags
+                : new List<string>();
+        }
+
+        private static void AppendTagList(StringBuilder sb, IList<string> tags)
+        {
+            if (tags == null || tags.Count == 0)
+            {
+                sb.Append(" Any");
+                return;
+            }
+            foreach (var tag in tags)
+                sb.Append(' ').Append(tag);
+        }
+
         // ── reflection helpers ─────────────────────────────────────────────
 
         private static bool TryFindField(string key, out FieldInfo field, out object owner)
@@ -1575,6 +2084,8 @@ namespace TwilightTimer
             sb.AppendLine("  twi marker [list|feed|add ...|remove <id>|toggle <id>|pb <ms>|pbclear|clear|save|reload]");
             sb.AppendLine("  twi flags [list|raise <Reason>|clear [forgivable|soft|all]]");
             sb.AppendLine("  twi lc [status|restart] | twi config [path|files]");
+            sb.AppendLine("  twi match [status|enter|exit|start ...|resume ...|stop|tags ...|segments|leaderboard|penalty]");
+            sb.AppendLine("  twi sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events ...]");
             Print(sb.ToString());
         }
 
@@ -1626,6 +2137,10 @@ namespace TwilightTimer
                     return "twi lc [status|restart]\r\nInspect LevelCollections integration or dispatch 'lc restart'.";
                 case "config":
                     return "twi config [path|files]\r\nPrint TwilightTimer config paths.";
+                case "match":
+                    return "twi match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]\r\nDrive Twilight Cup match mode and round lifecycle directly through TwilightTimerApi (synchronous debug surface).";
+                case "sim":
+                    return "twi sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events [on|off|status]]\r\nDrive the registered ITimerProvider adapter; mutations are queued and applied by 'twi sim drain' or the next TimerCore.Update.";
                 default:
                     return "Unknown TwilightTimer command topic: " + topic + ". Type 'twi' for the command list.";
             }

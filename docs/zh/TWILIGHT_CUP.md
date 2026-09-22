@@ -85,7 +85,9 @@ Real Time 现实/墙钟值 `real_time_ms`。游戏内
 ## 无 TwilightCore 驱动的调试（T1.6）
 
 `TwilightTimerApi` 为直连面：EnterMatchMode / ExitMatchMode / StartRound /
-StopRound / SetRoundTags / RoundStatusString。
+StopRound / SetRoundTags / RoundStatusString。游戏内可用 `twi match ...`
+同步驱动该直连面;`twi sim ...` 则经 `MainThreadQueue` 驱动已注册的
+`ITimerProvider` 适配器。
 
 ## 验收映射
 

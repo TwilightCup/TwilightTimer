@@ -8,8 +8,9 @@ using the built-in dev console (default keys **`~`** or **F1**).
 TwilightTimer registers a `twi ...` command family with the game's `Shell` console
 at plugin load. You can inspect live state, toggle settings, mutate config,
 switch tags, edit the HUD layout, manage presets, exercise subsegments and
-markers, and simulate validity flags — all without restarting the game or
-editing files by hand.
+markers, simulate validity flags, and drive Twilight Cup match rounds / the
+registered timer-provider adapter — all without restarting the game or editing
+files by hand.
 
 All `twi` commands are safe to run from the console. Most mutations call the
 same `ConfigService.SaveSettings()` path used by the settings panel, so they
@@ -58,6 +59,8 @@ persist to the normal `settings.ini` / `tags.ini` / `layout.ini` files.
 | `twi flags [list\|raise <Reason>\|clear [forgivable\|soft\|all]]` | Inspect/mutate validity flags (R5) |
 | `twi lc [status\|restart]` | Inspect LevelCollections integration or dispatch `lc restart` |
 | `twi config [path\|files]` | Print TwilightTimer config paths |
+| `twi match [status\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|segments\|leaderboard\|penalty]` | Drive Twilight Cup match mode / round lifecycle through `TwilightTimerApi` (synchronous debug surface) |
+| `twi sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|events ...]` | Drive the registered `ITimerProvider` adapter and mirror its outbound events to the log |
 
 ## Keys accepted by `twi get` / `twi set`
 
@@ -250,6 +253,72 @@ twi config files
 These print the exact paths used by the plugin so you can verify or edit files
 on disk.
 
+### 13. Twilight Cup match mode / round lifecycle (T2–T5)
+
+`twi match` drives the direct `TwilightTimerApi` debug surface synchronously —
+ideal for checking lifecycle and data retention without TwilightCore in the
+loop.
+
+```text
+twi match status
+twi match enter
+twi match start test-round single 3 Checkpoint Jumpless
+twi match status
+twi match tags NoCheckpoint,NoEC
+twi match segments
+twi match leaderboard
+twi match penalty
+twi match stop
+twi match status
+twi match exit
+```
+
+- `twi match status` reports match/round state, the current tag set, checkpoint
+  penalty latch, provider registration, and the match leaderboard state.
+- `twi match start <roundId> <single|multi> [retryCount] [tag...]` performs the
+  T3.1 full reset and applies the tag push; the clock still starts at the next
+  `PlayingLevel` edge. Tags may be separated by spaces or commas.
+- `twi match tags [clear|tag...]` changes the pushed tag set mid-round (only
+  honored while match mode is active).
+- `twi match segments` lists completed round segments and their validity
+  snapshots; data remains queryable after `twi match stop` (T3.5).
+- `twi match resume ...` re-activates a stopped round with the same round id
+  without clearing segments/totals.
+- `twi match exit` restores the user's pre-match tag set; it does not clear
+  round data.
+
+### 14. `ITimerProvider` adapter / event bus (T1, T4)
+
+`twi sim` exercises the actual adapter registered with TwilightCore's
+`TimerProviderRegistry`. Mutating calls are queued through `MainThreadQueue`, so
+use `twi sim drain` (or wait one frame) before checking the result.
+
+```text
+twi sim status
+twi sim events on
+twi sim enter
+twi sim drain
+twi sim start test-round multi 0 Checkpoint
+twi sim drain
+twi sim status
+twi sim tags NoCheckpoint
+twi sim drain
+twi sim stop
+twi sim drain
+twi sim exit
+twi sim drain
+twi sim events off
+```
+
+- `twi sim status` prints the provider API version, registration state, match /
+  round / segment / real-time queries, completed segments, and active invalid
+  marks.
+- `twi sim events on` mirrors `SegmentCompleted`, `AttemptSkipped`,
+  `RunCompleted`, `IncompleteExit`, and `InvalidMarked` to the BepInEx log so
+  the outbound event sequence can be verified.
+- `twi sim start/resume/stop/tags` call the interface methods; `twi sim drain`
+  runs the queued main-thread actions immediately.
+
 ## Test checklist
 
 - [ ] `twi` prints the command summary.
@@ -266,3 +335,7 @@ on disk.
 - [ ] `twi marker add/list/toggle/pb` works while in a level.
 - [ ] `twi flags raise/clear` shows the expected HUD banner / soft-flag line.
 - [ ] `twi lc status` reports correctly with LevelCollections installed or absent.
+- [ ] `twi match enter/start/tags/stop/exit` drives a round and restores the user's tags.
+- [ ] `twi match segments` retains completed round data after `twi match stop`.
+- [ ] `twi sim status` reports the registered provider and its live queries.
+- [ ] `twi sim events on` logs the expected T4 outbound event sequence.
