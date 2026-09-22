@@ -68,7 +68,7 @@ namespace TwilightTimer
         /// empty-scene transition).
         /// <paramref name="allowWhileKeyboardCaptured"/> is used by the in-game
         /// dev console: the console is itself a keyboard-capturing UI, so the
-        /// R6.1.2a input guard would otherwise make <c>twi retry</c> impossible.
+        /// R6.1.2a input guard would otherwise make <c>twitimer retry</c> impossible.
         /// Physical keybinds must keep the guard, so this stays opt-in.
         /// </summary>
         public static bool TryExecute(MonoBehaviour host, RunState state, SettingsModel settings, out string notifyKey, bool allowWhileKeyboardCaptured = false)

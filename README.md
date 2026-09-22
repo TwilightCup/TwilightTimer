@@ -35,7 +35,7 @@ and is fully localizable.
 - **Localization** — community-translatable `key:translation` files; English is
   the shipped base; a Simplified Chinese example is included. Settings-panel
   tabs from other plugins can opt into the same language selection.
-- **In-game test console** — a `twi ...` command set is registered with the
+- **In-game test console** — a `twitimer ...` command set is registered with the
   game's dev console (`~` / `F1`) so every feature can be inspected and tested
   from inside the game. See [TESTS.md](TESTS.md).
 

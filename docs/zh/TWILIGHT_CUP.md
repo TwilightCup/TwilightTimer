@@ -68,7 +68,7 @@ HUD 标签行与面板类别页。
 `TimerEvents` 转暴露为接口事件（逐订阅者 try/catch）。同时实现可选扩展
 `IRealtimeTimerProvider`，因此 TwilightCore 的 `live_time` 流会携带
 Real Time 现实/墙钟值 `real_time_ms`。游戏内
-`twi sim status` 会打印已注册提供方的实时状态。
+`twitimer sim status` 会打印已注册提供方的实时状态。
 
 ## 对局排行榜
 
@@ -85,8 +85,8 @@ Real Time 现实/墙钟值 `real_time_ms`。游戏内
 ## 无 TwilightCore 驱动的调试（T1.6）
 
 `TwilightTimerApi` 为直连面：EnterMatchMode / ExitMatchMode / StartRound /
-StopRound / SetRoundTags / RoundStatusString。游戏内可用 `twi match ...`
-同步驱动该直连面;`twi sim ...` 则经 `MainThreadQueue` 驱动已注册的
+StopRound / SetRoundTags / RoundStatusString。游戏内可用 `twitimer match ...`
+同步驱动该直连面;`twitimer sim ...` 则经 `MainThreadQueue` 驱动已注册的
 `ITimerProvider` 适配器。
 
 ## 验收映射

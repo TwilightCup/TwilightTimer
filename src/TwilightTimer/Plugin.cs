@@ -137,7 +137,7 @@ namespace TwilightTimer
             markersGo.AddComponent<MarkersManager>();
             markersGo.AddComponent<MarkerOverlay>();
 
-            // 8. In-game dev console: register the "twi ..." commands with the
+            // 8. In-game dev console: register the "twitimer ..." commands with the
             //     game's Shell console (~ / F1) so every feature can be inspected
             //     and tested from inside the game. Safe before Shell.instance exists.
             ConsoleCommands.Register();

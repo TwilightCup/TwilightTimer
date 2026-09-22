@@ -83,7 +83,7 @@ queries are point-in-time snapshots; the internal `TimerEvents` are
 re-exposed as the interface's events (per-subscriber try/catch). It also
 implements the optional `IRealtimeTimerProvider`, so TwilightCore's
 `live_time` stream carries the Real Time wall-clock value as
-`real_time_ms`. In-game, `twi sim status` prints the registered provider's
+`real_time_ms`. In-game, `twitimer sim status` prints the registered provider's
 live state.
 
 ## In-match leaderboard
@@ -104,7 +104,7 @@ localized "You" and no seat colour.
 
 `TwilightTimerApi` is the direct-consumption surface (T1.6): EnterMatchMode /
 ExitMatchMode / StartRound / StopRound / SetRoundTags / RoundStatusString.
-In-game, `twi match ...` drives this surface synchronously; `twi sim ...` drives
+In-game, `twitimer match ...` drives this surface synchronously; `twitimer sim ...` drives
 the registered `ITimerProvider` adapter through `MainThreadQueue`.
 
 ## Acceptance mapping

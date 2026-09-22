@@ -543,7 +543,7 @@ namespace TwilightTimer
 
             // While any other keyboard-capturing UI is open (chat, text input,
             // dialog, and the in-game dev console), suppress gameplay keybinds
-            // too. Without this, typing an 'r' inside 'twi status' can trigger a
+            // too. Without this, typing an 'r' inside 'twitimer status' can trigger a
             // retry, and Backspace can silently full-reset a run while fixing a
             // typo (same guard as RetryAction R6.1.2a).
             if (MenuSystem.keyboardState != KeyboardState.None)

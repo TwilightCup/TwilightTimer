@@ -7,7 +7,7 @@ This file contains user-facing release notes for TwilightTimer. Only changes tha
 - **Release Date:** Unreleased
 - **Highlights:** _To be filled during version branch preparation._
 - **Details:**
-  - Added an in-game dev console command set (`twi ...`, opened with `~` / `F1`) so every feature — timer, reset/retry, settings, tags, HUD/layout, localization, presets, subsegments, markers, validity flags, LevelCollections integration, and Twilight Cup match/round lifecycle — can be inspected and tested from inside the game. `twi match ...` drives the direct debug API, while `twi sim ...` drives the registered `ITimerProvider` adapter and can mirror its outbound events to the log. See `TESTS.md`.
+  - Added an in-game dev console command set (`twitimer ...`, opened with `~` / `F1`) so every feature — timer, reset/retry, settings, tags, HUD/layout, localization, presets, subsegments, markers, validity flags, LevelCollections integration, and Twilight Cup match/round lifecycle — can be inspected and tested from inside the game. `twitimer match ...` drives the direct debug API, while `twitimer sim ...` drives the registered `ITimerProvider` adapter and can mirror its outbound events to the log. See `TESTS.md`.
   - Fixed the manual reset and one-key retry hotkeys still firing while a text input was open (for example the in-game chat), which could silently reset or restart a run while typing.
 - **Contributors:** _To be filled from PRs merged into dev._
 

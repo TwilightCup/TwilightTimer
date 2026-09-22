@@ -11,7 +11,7 @@ using UnityEngine;
 namespace TwilightTimer
 {
     /// <summary>
-    /// Registers an <c>twi</c> command family with the game's built-in dev
+    /// Registers an <c>twitimer</c> command family with the game's built-in dev
     /// console (<c>Shell</c>, toggled with <c>~</c> or <c>F1</c>) so every
     /// TwilightTimer feature can be inspected and exercised from inside the game.
     ///
@@ -25,7 +25,7 @@ namespace TwilightTimer
     /// </summary>
     public static class ConsoleCommands
     {
-        private const string Prefix = "twi";
+        private const string Prefix = "twitimer";
 
         private static bool _registered;
 
@@ -66,7 +66,7 @@ namespace TwilightTimer
                 // adds the built-in help commands; it never clears the registry).
                 Shell.RegisterCommand(Prefix, new Action<string>(OnCommand), HelpFor(Prefix));
                 Shell.RegisterCommand("twilighttimer", new Action<string>(OnCommand), HelpFor("twilighttimer"));
-                Plugin.Logger.LogInfo("TwilightTimer: dev-console commands registered (type 'twi help' with ~/F1).");
+                Plugin.Logger.LogInfo("TwilightTimer: dev-console commands registered (type 'twitimer help' with ~/F1).");
             }
             catch (Exception ex)
             {
@@ -84,8 +84,8 @@ namespace TwilightTimer
                 // Mirror the incoming command to the BepInEx log so a headless /
                 // CI pass can see exactly what was invoked, not just its result.
                 // The game's Shell passes null for a zero-argument invocation
-                // (bare 'twi'), so args must not be dereferenced directly.
-                Plugin.Logger.LogInfo("TwilightTimer[console]: > twi" + (string.IsNullOrEmpty(args) ? "" : " " + args));
+                // (bare 'twitimer'), so args must not be dereferenced directly.
+                Plugin.Logger.LogInfo("TwilightTimer[console]: > twitimer" + (string.IsNullOrEmpty(args) ? "" : " " + args));
 
                 var parts = SplitArgs(args);
                 if (parts.Count == 0)
@@ -123,7 +123,7 @@ namespace TwilightTimer
                     case "match": CmdMatch(rest); break;
                     case "sim": CmdSim(rest); break;
                     default:
-                        Print($"Unknown TwilightTimer command: {cmd}. Type 'twi help' for usage.");
+                        Print($"Unknown TwilightTimer command: {cmd}. Type 'twitimer help' for usage.");
                         break;
                 }
             }
@@ -223,7 +223,7 @@ namespace TwilightTimer
             foreach (var f in LayoutFields)
             {
                 if (f.FieldType == typeof(List<RowType>) || f.FieldType == typeof(List<CustomText>))
-                    continue; // managed by 'twi layout row/text'
+                    continue; // managed by 'twitimer layout row/text'
                 sb.Append("  ").AppendLine(FieldName(f.Name));
             }
             Print(sb.ToString());
@@ -233,7 +233,7 @@ namespace TwilightTimer
         {
             var cfg = ConfigService.Instance;
             if (cfg == null) { Print("TwilightTimer config is not ready."); return; }
-            if (args.Count == 0) { Print("Usage: twi get <key> | twi get all"); return; }
+            if (args.Count == 0) { Print("Usage: twitimer get <key> | twitimer get all"); return; }
 
             string key = args[0];
             if (Normalize(key) == "all")
@@ -261,7 +261,7 @@ namespace TwilightTimer
             }
             else
             {
-                Print($"Unknown TwilightTimer key: {key}. Try 'twi keys' or 'twi get all'.");
+                Print($"Unknown TwilightTimer key: {key}. Try 'twitimer keys' or 'twitimer get all'.");
             }
         }
 
@@ -269,14 +269,14 @@ namespace TwilightTimer
         {
             var cfg = ConfigService.Instance;
             if (cfg == null) { Print("TwilightTimer config is not ready."); return; }
-            if (args.Count < 2) { Print("Usage: twi set <key> <value>"); return; }
+            if (args.Count < 2) { Print("Usage: twitimer set <key> <value>"); return; }
 
             string key = args[0];
             string value = string.Join(" ", args.GetRange(1, args.Count - 1));
 
             if (!TryFindField(key, out FieldInfo field, out object owner))
             {
-                Print($"Unknown TwilightTimer key: {key}. Try 'twi keys' or 'twi get all'.");
+                Print($"Unknown TwilightTimer key: {key}. Try 'twitimer keys' or 'twitimer get all'.");
                 return;
             }
 
@@ -393,7 +393,7 @@ namespace TwilightTimer
                 return;
             }
             // The console is itself a keyboard-capturing UI; opt out of the
-            // R6.1.2a input guard so 'twi retry' can exercise the retry flow.
+            // R6.1.2a input guard so 'twitimer retry' can exercise the retry flow.
             // Physical keybinds keep the guard (see TimerCore.HandleKeybinds).
             if (RetryAction.TryExecute(core, TimerCore.State, cfg.Settings, out string notifyKey, allowWhileKeyboardCaptured: true))
                 core.RefreshTimingOptions(); // restart may change timing context
@@ -417,7 +417,7 @@ namespace TwilightTimer
                     Print("show_hud = " + (cfg.Settings.ShowHud ? "true" : "false"));
                     return;
                 default:
-                    Print("Usage: twi hud [on|off|toggle|status]");
+                    Print("Usage: twitimer hud [on|off|toggle|status]");
                     return;
             }
             cfg.SaveSettings();
@@ -438,7 +438,7 @@ namespace TwilightTimer
                     Print("panel = " + (panel.IsVisible ? "visible" : "hidden"));
                     return;
                 default:
-                    Print("Usage: twi panel [open|close|toggle|status]");
+                    Print("Usage: twitimer panel [open|close|toggle|status]");
                     return;
             }
             Print("panel = " + (panel.IsVisible ? "visible" : "hidden"));
@@ -466,7 +466,7 @@ namespace TwilightTimer
                 case "mode":
                     if (args.Count < 2)
                     {
-                        Print("Usage: twi leaderboard mode <Subsegment|Markers>");
+                        Print("Usage: twitimer leaderboard mode <Subsegment|Markers>");
                         return;
                     }
                     lb.SetMode(args[1]);
@@ -475,7 +475,7 @@ namespace TwilightTimer
                     Print($"leaderboard = {(lb.Visible ? "visible" : "hidden")}, mode = {cfg.Layout.LeaderboardMode}");
                     return;
                 default:
-                    Print("Usage: twi leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]");
+                    Print("Usage: twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]");
                     return;
             }
             Print($"leaderboard = {(lb.Visible ? "visible" : "hidden")}, mode = {cfg.Layout.LeaderboardMode}");
@@ -497,15 +497,15 @@ namespace TwilightTimer
                 case "row": CmdLayoutRow(cfg, rest); break;
                 case "text": CmdLayoutText(cfg, rest); break;
                 case "set":
-                    if (rest.Count < 2) { Print("Usage: twi layout set <key> <value>"); return; }
+                    if (rest.Count < 2) { Print("Usage: twitimer layout set <key> <value>"); return; }
                     CmdSet(new List<string> { rest[0], string.Join(" ", rest.GetRange(1, rest.Count - 1)) });
                     break;
                 case "get":
-                    if (rest.Count < 1) { Print("Usage: twi layout get <key>"); return; }
+                    if (rest.Count < 1) { Print("Usage: twitimer layout get <key>"); return; }
                     CmdGet(new List<string> { rest[0] });
                     break;
                 default:
-                    Print("Usage: twi layout [status|row ...|text ...|get <key>|set <key> <value>]");
+                    Print("Usage: twitimer layout [status|row ...|text ...|get <key>|set <key> <value>]");
                     break;
             }
         }
@@ -533,7 +533,7 @@ namespace TwilightTimer
         private static void CmdLayoutRow(ConfigService cfg, List<string> args)
         {
             var l = cfg.Layout;
-            if (args.Count == 0) { Print("Usage: twi layout row <list|add <type>|remove <index>|clear>"); return; }
+            if (args.Count == 0) { Print("Usage: twitimer layout row <list|add <type>|remove <index>|clear>"); return; }
             string sub = args[0].ToLowerInvariant();
             switch (sub)
             {
@@ -544,7 +544,7 @@ namespace TwilightTimer
                     Print(sb.Length == 0 ? "No rows configured." : sb.ToString());
                     return;
                 case "add":
-                    if (args.Count < 2) { Print("Usage: twi layout row add <RowType>"); return; }
+                    if (args.Count < 2) { Print("Usage: twitimer layout row add <RowType>"); return; }
                     if (Enum.TryParse(args[1], true, out RowType rt))
                     {
                         l.Rows.Add(rt);
@@ -560,7 +560,7 @@ namespace TwilightTimer
                     if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
                         || idx < 0 || idx >= l.Rows.Count)
                     {
-                        Print("Usage: twi layout row remove <index>");
+                        Print("Usage: twitimer layout row remove <index>");
                         return;
                     }
                     var removed = l.Rows[idx];
@@ -574,7 +574,7 @@ namespace TwilightTimer
                     Print("Cleared all layout rows.");
                     return;
                 default:
-                    Print("Usage: twi layout row <list|add <type>|remove <index>|clear>");
+                    Print("Usage: twitimer layout row <list|add <type>|remove <index>|clear>");
                     return;
             }
         }
@@ -582,7 +582,7 @@ namespace TwilightTimer
         private static void CmdLayoutText(ConfigService cfg, List<string> args)
         {
             var l = cfg.Layout;
-            if (args.Count == 0) { Print("Usage: twi layout text <list|add <x> <y> <text...>|remove <index>|clear>"); return; }
+            if (args.Count == 0) { Print("Usage: twitimer layout text <list|add <x> <y> <text...>|remove <index>|clear>"); return; }
             string sub = args[0].ToLowerInvariant();
             switch (sub)
             {
@@ -598,7 +598,7 @@ namespace TwilightTimer
                 case "add":
                     if (args.Count < 4)
                     {
-                        Print("Usage: twi layout text add <x> <y> <text...>");
+                        Print("Usage: twitimer layout text add <x> <y> <text...>");
                         return;
                     }
                     if (!float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)
@@ -616,7 +616,7 @@ namespace TwilightTimer
                     if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
                         || idx < 0 || idx >= l.CustomTexts.Count)
                     {
-                        Print("Usage: twi layout text remove <index>");
+                        Print("Usage: twitimer layout text remove <index>");
                         return;
                     }
                     l.CustomTexts.RemoveAt(idx);
@@ -629,7 +629,7 @@ namespace TwilightTimer
                     Print("Cleared all custom texts.");
                     return;
                 default:
-                    Print("Usage: twi layout text <list|add <x> <y> <text...>|remove <index>|clear>");
+                    Print("Usage: twitimer layout text <list|add <x> <y> <text...>|remove <index>|clear>");
                     return;
             }
         }
@@ -646,11 +646,11 @@ namespace TwilightTimer
             {
                 case "list": CmdTagList(cfg); break;
                 case "enable":
-                    if (args.Count < 2) { Print("Usage: twi tag enable <id>"); return; }
+                    if (args.Count < 2) { Print("Usage: twitimer tag enable <id>"); return; }
                     string enableId = CanonicalTagId(args[1]);
                     if (enableId == null)
                     {
-                        Print($"Unknown tag: {args[1]}. Use 'twi tag list'.");
+                        Print($"Unknown tag: {args[1]}. Use 'twitimer tag list'.");
                         return;
                     }
                     cfg.EnabledTags.Enable(enableId);
@@ -658,18 +658,18 @@ namespace TwilightTimer
                     Print($"Tag {enableId} enabled.");
                     break;
                 case "disable":
-                    if (args.Count < 2) { Print("Usage: twi tag disable <id>"); return; }
+                    if (args.Count < 2) { Print("Usage: twitimer tag disable <id>"); return; }
                     string disableId = CanonicalTagId(args[1]) ?? args[1];
                     cfg.EnabledTags.Disable(disableId);
                     cfg.SaveSettings();
                     Print($"Tag {disableId} disabled.");
                     break;
                 case "set":
-                    if (args.Count < 3) { Print("Usage: twi tag set <id> <on|off>"); return; }
+                    if (args.Count < 3) { Print("Usage: twitimer tag set <id> <on|off>"); return; }
                     string setId = CanonicalTagId(args[1]);
                     if (setId == null)
                     {
-                        Print($"Unknown tag: {args[1]}. Use 'twi tag list'.");
+                        Print($"Unknown tag: {args[1]}. Use 'twitimer tag list'.");
                         return;
                     }
                     if (SettingsModel.ParseBool(args[2], false))
@@ -680,7 +680,7 @@ namespace TwilightTimer
                     Print($"Tag {setId} = {(cfg.EnabledTags.HasTag(setId) ? "on" : "off")}.");
                     break;
                 default:
-                    Print("Usage: twi tag [list|enable <id>|disable <id>|set <id> <on|off>]");
+                    Print("Usage: twitimer tag [list|enable <id>|disable <id>|set <id> <on|off>]");
                     break;
             }
         }
@@ -740,7 +740,7 @@ namespace TwilightTimer
             {
                 case "list": CmdLangList(cfg); break;
                 case "set":
-                    if (args.Count < 2) { Print("Usage: twi lang set <code>"); return; }
+                    if (args.Count < 2) { Print("Usage: twitimer lang set <code>"); return; }
                     string canonicalCode = null;
                     foreach (var lang in cfg.Localization.Languages)
                     {
@@ -752,7 +752,7 @@ namespace TwilightTimer
                     }
                     if (canonicalCode == null)
                     {
-                        Print($"Language '{args[1]}' not found. Use 'twi lang list'.");
+                        Print($"Language '{args[1]}' not found. Use 'twitimer lang list'.");
                         return;
                     }
                     cfg.Localization.SetLanguage(canonicalCode);
@@ -770,7 +770,7 @@ namespace TwilightTimer
                     Print($"current language = {cfg.Localization.CurrentCode} ({cfg.Localization.DisplayNameOf(cfg.Localization.CurrentCode)})");
                     break;
                 default:
-                    Print("Usage: twi lang [list|set <code>|reload|current]");
+                    Print("Usage: twitimer lang [list|set <code>|reload|current]");
                     break;
             }
         }
@@ -804,10 +804,10 @@ namespace TwilightTimer
                     break;
                 case "create":
                 case "new":
-                    if (args.Count < 2) { Print("Usage: twi preset create <name>"); return; }
+                    if (args.Count < 2) { Print("Usage: twitimer preset create <name>"); return; }
                     if (FindPresetName(args[1]) != null)
                     {
-                        Print($"Preset '{args[1]}' already exists. Use 'twi preset list'.");
+                        Print($"Preset '{args[1]}' already exists. Use 'twitimer preset list'.");
                         return;
                     }
                     if (PresetStore.TryCreate(args[1], cfg, out string errorKey))
@@ -822,7 +822,7 @@ namespace TwilightTimer
                         string actualName = FindPresetName(args[1]);
                         if (actualName == null)
                         {
-                            Print($"Preset '{args[1]}' not found. Use 'twi preset list'.");
+                            Print($"Preset '{args[1]}' not found. Use 'twitimer preset list'.");
                             return;
                         }
                         cfg.Settings.CurrentPreset = actualName;
@@ -841,11 +841,11 @@ namespace TwilightTimer
                     break;
                 case "delete":
                 case "remove":
-                    if (args.Count < 2) { Print("Usage: twi preset delete <name>"); return; }
+                    if (args.Count < 2) { Print("Usage: twitimer preset delete <name>"); return; }
                     string target = FindPresetName(args[1]);
                     if (target == null)
                     {
-                        Print($"Preset '{args[1]}' not found. Use 'twi preset list'.");
+                        Print($"Preset '{args[1]}' not found. Use 'twitimer preset list'.");
                         return;
                     }
                     if (!string.Equals(target, cfg.Settings.CurrentPreset, StringComparison.OrdinalIgnoreCase))
@@ -859,7 +859,7 @@ namespace TwilightTimer
                         Print("Preset deletion failed (default cannot be deleted).");
                     break;
                 default:
-                    Print("Usage: twi preset [list|current|create <name>|apply [name]|save|delete <name>]");
+                    Print("Usage: twitimer preset [list|current|create <name>|apply [name]|save|delete <name>]");
                     break;
             }
         }
@@ -933,7 +933,7 @@ namespace TwilightTimer
                     Print("Cleared subsegment runtime state (no PB written).");
                     break;
                 default:
-                    Print("Usage: twi sub [status|entries|clear]");
+                    Print("Usage: twitimer sub [status|entries|clear]");
                     break;
             }
         }
@@ -956,15 +956,15 @@ namespace TwilightTimer
                 case "feed": CmdMarkerFeed(); break;
                 case "add": CmdMarkerAdd(mgr, rest); break;
                 case "remove":
-                    if (rest.Count < 1) { Print("Usage: twi marker remove <id>"); return; }
+                    if (rest.Count < 1) { Print("Usage: twitimer marker remove <id>"); return; }
                     CmdMarkerRemove(mgr, rest[0]);
                     break;
                 case "toggle":
-                    if (rest.Count < 1) { Print("Usage: twi marker toggle <id>"); return; }
+                    if (rest.Count < 1) { Print("Usage: twitimer marker toggle <id>"); return; }
                     CmdMarkerToggle(mgr, rest[0]);
                     break;
                 case "pb":
-                    if (rest.Count < 1) { Print("Usage: twi marker pb <total_ms>"); return; }
+                    if (rest.Count < 1) { Print("Usage: twitimer marker pb <total_ms>"); return; }
                     CmdMarkerSetPb(mgr, rest[0]);
                     break;
                 case "pbclear":
@@ -982,7 +982,7 @@ namespace TwilightTimer
                     Print("Marker cache reloaded from disk.");
                     break;
                 default:
-                    Print("Usage: twi marker [list|feed|add ...|remove <id>|toggle <id>|pb <total_ms>|pbclear|clear|save|reload]");
+                    Print("Usage: twitimer marker [list|feed|add ...|remove <id>|toggle <id>|pb <total_ms>|pbclear|clear|save|reload]");
                     break;
             }
         }
@@ -1056,7 +1056,7 @@ namespace TwilightTimer
 
         private static void CmdMarkerAdd(MarkersManager mgr, List<string> args)
         {
-            if (args.Count < 1) { Print("Usage: twi marker add <range|checkpoint|grab> ..."); return; }
+            if (args.Count < 1) { Print("Usage: twitimer marker add <range|checkpoint|grab> ..."); return; }
             string type = args[0].ToLowerInvariant();
             var set = CurrentMarkerSet();
             if (set == null)
@@ -1088,7 +1088,7 @@ namespace TwilightTimer
             // Syntax: range <name> [cx cy cz sx sy sz] [grab] [jump]
             if (args.Count < 1)
             {
-                Print("Usage: twi marker add range <name> [cx cy cz sx sy sz] [grab] [jump]");
+                Print("Usage: twitimer marker add range <name> [cx cy cz sx sy sz] [grab] [jump]");
                 return;
             }
             string name = args[0];
@@ -1136,7 +1136,7 @@ namespace TwilightTimer
             // Syntax: checkpoint <name> <index> [load]
             if (args.Count < 2)
             {
-                Print("Usage: twi marker add checkpoint <name> <index> [load]");
+                Print("Usage: twitimer marker add checkpoint <name> <index> [load]");
                 return;
             }
             if (!int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int cp))
@@ -1163,7 +1163,7 @@ namespace TwilightTimer
         {
             if (args.Count < 1)
             {
-                Print("Usage: twi marker add grab <name>");
+                Print("Usage: twitimer marker add grab <name>");
                 return;
             }
             var def = new MarkerDef
@@ -1266,7 +1266,7 @@ namespace TwilightTimer
             {
                 case "list": CmdFlagsList(state); break;
                 case "raise":
-                    if (args.Count < 2) { Print("Usage: twi flags raise <Reason>"); return; }
+                    if (args.Count < 2) { Print("Usage: twitimer flags raise <Reason>"); return; }
                     if (Enum.TryParse(args[1], true, out InvalidReason reason))
                     {
                         state.Flags.Raise(reason);
@@ -1284,11 +1284,11 @@ namespace TwilightTimer
                         case "forgivable": state.Flags.ClearForgivable(); Print("Cleared forgivable flags."); break;
                         case "soft": state.Flags.ClearSoftFlags(); Print("Cleared soft flags."); break;
                         case "all": state.Flags.ClearAll(); Print("Cleared all validity flags."); break;
-                        default: Print("Usage: twi flags clear [forgivable|soft|all]"); break;
+                        default: Print("Usage: twitimer flags clear [forgivable|soft|all]"); break;
                     }
                     break;
                 default:
-                    Print("Usage: twi flags [list|raise <Reason>|clear [forgivable|soft|all]]");
+                    Print("Usage: twitimer flags [list|raise <Reason>|clear [forgivable|soft|all]]");
                     break;
             }
         }
@@ -1334,7 +1334,7 @@ namespace TwilightTimer
                         Print("LC restart refused (not in a run or delayed command pending).");
                     break;
                 default:
-                    Print("Usage: twi lc [status|restart]");
+                    Print("Usage: twitimer lc [status|restart]");
                     break;
             }
         }
@@ -1356,7 +1356,7 @@ namespace TwilightTimer
                     Print("presets dir: " + PresetStore.RootDir);
                     break;
                 default:
-                    Print("Usage: twi config [path|files]");
+                    Print("Usage: twitimer config [path|files]");
                     break;
             }
         }
@@ -1374,7 +1374,7 @@ namespace TwilightTimer
         /// <summary>
         /// Direct match/round testing through <see cref="TwilightTimerApi"/>
         /// (the debug surface). These calls execute synchronously, so the next
-        /// <c>twi match status</c> reflects them immediately.
+        /// <c>twitimer match status</c> reflects them immediately.
         /// </summary>
         private static void CmdMatch(List<string> args)
         {
@@ -1428,7 +1428,7 @@ namespace TwilightTimer
                     Print("checkpoint penalty pending = " + (MatchCheckpointPenalty.Pending ? "true" : "false"));
                     break;
                 default:
-                    Print("Usage: twi match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]");
+                    Print("Usage: twitimer match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]");
                     break;
             }
         }
@@ -1462,7 +1462,7 @@ namespace TwilightTimer
 
             Print($"round '{roundId}' start requested ({(single ? "SINGLE" : "MULTI")}, retry={retry}); clock starts at the next PlayingLevel edge.");
             if (!MatchMode.Active)
-                Print("Warning: match mode is not active, so the pushed tags were ignored. Use 'twi match enter' first.");
+                Print("Warning: match mode is not active, so the pushed tags were ignored. Use 'twitimer match enter' first.");
             Print(RoundTracker.StatusString());
         }
 
@@ -1531,7 +1531,7 @@ namespace TwilightTimer
         /// Provider-level testing through <see cref="TwilightTimerProvider"/> /
         /// <see cref="TimerProviderRegistry"/>: exercises the actual
         /// ITimerProvider adapter and its main-thread marshaling (T1/T4).
-        /// Mutations are queued; use <c>twi sim drain</c> to apply immediately
+        /// Mutations are queued; use <c>twitimer sim drain</c> to apply immediately
         /// instead of waiting for the next TimerCore.Update.
         /// </summary>
         private static void CmdSim(List<string> args)
@@ -1552,7 +1552,7 @@ namespace TwilightTimer
                     var provider = RequireSimProvider();
                     if (provider == null) return;
                     provider.EnterMatchMode();
-                    Print("provider EnterMatchMode() queued; run 'twi sim drain' or wait one frame.");
+                    Print("provider EnterMatchMode() queued; run 'twitimer sim drain' or wait one frame.");
                     break;
                 }
                 case "exit":
@@ -1560,7 +1560,7 @@ namespace TwilightTimer
                     var provider = RequireSimProvider();
                     if (provider == null) return;
                     provider.ExitMatchMode();
-                    Print("provider ExitMatchMode() queued; run 'twi sim drain' or wait one frame.");
+                    Print("provider ExitMatchMode() queued; run 'twitimer sim drain' or wait one frame.");
                     break;
                 }
                 case "start":
@@ -1574,7 +1574,7 @@ namespace TwilightTimer
                     var provider = RequireSimProvider();
                     if (provider == null) return;
                     provider.StopRound();
-                    Print("provider StopRound() queued; run 'twi sim drain' or wait one frame.");
+                    Print("provider StopRound() queued; run 'twitimer sim drain' or wait one frame.");
                     break;
                 }
                 case "tags":
@@ -1584,7 +1584,7 @@ namespace TwilightTimer
                     CmdSimEvents(rest);
                     break;
                 default:
-                    Print("Usage: twi sim [status|drain|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|events [on|off|status]]");
+                    Print("Usage: twitimer sim [status|drain|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|events [on|off|status]]");
                     break;
             }
         }
@@ -1631,7 +1631,7 @@ namespace TwilightTimer
                 RetryCount = retry,
                 Tags = tags,
             });
-            Print($"provider StartRound('{roundId}') queued; run 'twi sim drain' or wait one frame.");
+            Print($"provider StartRound('{roundId}') queued; run 'twitimer sim drain' or wait one frame.");
         }
 
         private static void CmdSimResume(List<string> args)
@@ -1655,7 +1655,7 @@ namespace TwilightTimer
                 RetryCount = retry,
                 Tags = tags,
             });
-            Print($"provider ResumeRound('{roundId}') queued; run 'twi sim drain' or wait one frame.");
+            Print($"provider ResumeRound('{roundId}') queued; run 'twitimer sim drain' or wait one frame.");
         }
 
         private static void CmdSimTags(List<string> args)
@@ -1712,7 +1712,7 @@ namespace TwilightTimer
                     Print("provider event logging = " + (_simEventLogging ? "on" : "off"));
                     break;
                 default:
-                    Print("Usage: twi sim events [on|off|status]");
+                    Print("Usage: twitimer sim events [on|off|status]");
                     break;
             }
         }
@@ -2071,21 +2071,21 @@ namespace TwilightTimer
         private static void PrintSummary()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("TwilightTimer console commands. Use 'twi help <topic>' for details.");
-            sb.AppendLine("  twi status | keys | get <key> | set <key> <value> | reload | save");
-            sb.AppendLine("  twi reset | retry");
-            sb.AppendLine("  twi hud [on|off|toggle|status] | panel [open|close|toggle|status]");
-            sb.AppendLine("  twi leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]");
-            sb.AppendLine("  twi layout [status|row ...|text ...]");
-            sb.AppendLine("  twi tag [list|enable <id>|disable <id>|set <id> <on|off>]");
-            sb.AppendLine("  twi lang [list|set <code>|reload|current]");
-            sb.AppendLine("  twi preset [list|current|create <name>|apply [name]|save|delete <name>]");
-            sb.AppendLine("  twi sub [status|entries|clear]");
-            sb.AppendLine("  twi marker [list|feed|add ...|remove <id>|toggle <id>|pb <ms>|pbclear|clear|save|reload]");
-            sb.AppendLine("  twi flags [list|raise <Reason>|clear [forgivable|soft|all]]");
-            sb.AppendLine("  twi lc [status|restart] | twi config [path|files]");
-            sb.AppendLine("  twi match [status|enter|exit|start ...|resume ...|stop|tags ...|segments|leaderboard|penalty]");
-            sb.AppendLine("  twi sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events ...]");
+            sb.AppendLine("TwilightTimer console commands. Use 'twitimer help <topic>' for details.");
+            sb.AppendLine("  twitimer status | keys | get <key> | set <key> <value> | reload | save");
+            sb.AppendLine("  twitimer reset | retry");
+            sb.AppendLine("  twitimer hud [on|off|toggle|status] | panel [open|close|toggle|status]");
+            sb.AppendLine("  twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]");
+            sb.AppendLine("  twitimer layout [status|row ...|text ...]");
+            sb.AppendLine("  twitimer tag [list|enable <id>|disable <id>|set <id> <on|off>]");
+            sb.AppendLine("  twitimer lang [list|set <code>|reload|current]");
+            sb.AppendLine("  twitimer preset [list|current|create <name>|apply [name]|save|delete <name>]");
+            sb.AppendLine("  twitimer sub [status|entries|clear]");
+            sb.AppendLine("  twitimer marker [list|feed|add ...|remove <id>|toggle <id>|pb <ms>|pbclear|clear|save|reload]");
+            sb.AppendLine("  twitimer flags [list|raise <Reason>|clear [forgivable|soft|all]]");
+            sb.AppendLine("  twitimer lc [status|restart] | twitimer config [path|files]");
+            sb.AppendLine("  twitimer match [status|enter|exit|start ...|resume ...|stop|tags ...|segments|leaderboard|penalty]");
+            sb.AppendLine("  twitimer sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events ...]");
             Print(sb.ToString());
         }
 
@@ -2093,56 +2093,56 @@ namespace TwilightTimer
         {
             switch (Normalize(topic))
             {
-                case "twi":
-                case "twihelp":
+                case "twitimer":
+                case "twitimerhelp":
                 case "twilighttimer":
-                    return "twi <command> [args]\r\nTwilightTimer in-game test/debug console.\r\nType 'twi' for the command list or 'twi help <topic>' for one command.";
+                    return "twitimer <command> [args]\r\nTwilightTimer in-game test/debug console.\r\nType 'twitimer' for the command list or 'twitimer help <topic>' for one command.";
                 case "status":
-                    return "twi status\r\nPrint the full live state of the timer engine, config, tags, HUD, subsegment, markers, leaderboard, LC and config paths.";
+                    return "twitimer status\r\nPrint the full live state of the timer engine, config, tags, HUD, subsegment, markers, leaderboard, LC and config paths.";
                 case "keys":
-                    return "twi keys\r\nList all settable settings.ini / layout.ini keys accepted by 'twi get/set'.";
+                    return "twitimer keys\r\nList all settable settings.ini / layout.ini keys accepted by 'twitimer get/set'.";
                 case "get":
-                    return "twi get <key>\r\nPrint one config value. 'twi get all' prints every config value.";
+                    return "twitimer get <key>\r\nPrint one config value. 'twitimer get all' prints every config value.";
                 case "set":
-                    return "twi set <key> <value>\r\nSet a config value and save. Boolean keys accept true/false/1/0/on/off/yes/no.";
+                    return "twitimer set <key> <value>\r\nSet a config value and save. Boolean keys accept true/false/1/0/on/off/yes/no.";
                 case "reload":
-                    return "twi reload\r\nRe-read all config files and language files from disk.";
+                    return "twitimer reload\r\nRe-read all config files and language files from disk.";
                 case "save":
-                    return "twi save\r\nSave the current in-memory config to disk.";
+                    return "twitimer save\r\nSave the current in-memory config to disk.";
                 case "reset":
-                    return "twi reset\r\nPerform the same full-run reset as the reset key (clears timers and all validity flags).";
+                    return "twitimer reset\r\nPerform the same full-run reset as the reset key (clears timers and all validity flags).";
                 case "retry":
-                    return "twi retry\r\nPerform the same one-key retry as the retry key (R6).";
+                    return "twitimer retry\r\nPerform the same one-key retry as the retry key (R6).";
                 case "hud":
-                    return "twi hud [on|off|toggle|status]\r\nShow/hide/toggle the timer HUD (show_hud).";
+                    return "twitimer hud [on|off|toggle|status]\r\nShow/hide/toggle the timer HUD (show_hud).";
                 case "panel":
-                    return "twi panel [open|close|toggle|status]\r\nOpen/close/toggle the IMGUI settings panel.";
+                    return "twitimer panel [open|close|toggle|status]\r\nOpen/close/toggle the IMGUI settings panel.";
                 case "leaderboard":
-                    return "twi leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]\r\nControl the shared leaderboard HUD.";
+                    return "twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]\r\nControl the shared leaderboard HUD.";
                 case "layout":
-                    return "twi layout [status|row <list|add <type>|remove <index>|clear>|text <list|add <x> <y> <text...>|remove <index>|clear>|get <key>|set <key> <value>]\r\nInspect/edit the HUD layout.";
+                    return "twitimer layout [status|row <list|add <type>|remove <index>|clear>|text <list|add <x> <y> <text...>|remove <index>|clear>|get <key>|set <key> <value>]\r\nInspect/edit the HUD layout.";
                 case "tag":
-                    return "twi tag [list|enable <id>|disable <id>|set <id> <on|off>]\r\nList available tag rules and toggle which tags are enabled (tags.ini).";
+                    return "twitimer tag [list|enable <id>|disable <id>|set <id> <on|off>]\r\nList available tag rules and toggle which tags are enabled (tags.ini).";
                 case "lang":
-                    return "twi lang [list|set <code>|reload|current]\r\nList/change/reload the active language.";
+                    return "twitimer lang [list|set <code>|reload|current]\r\nList/change/reload the active language.";
                 case "preset":
-                    return "twi preset [list|current|create <name>|apply [name]|save|delete <name>]\r\nManage layout/marker presets (R11).";
+                    return "twitimer preset [list|current|create <name>|apply [name]|save|delete <name>]\r\nManage layout/marker presets (R11).";
                 case "sub":
-                    return "twi sub [status|entries|clear]\r\nInspect the subsegment module: options, leaderboard entries, or clear runtime state.";
+                    return "twitimer sub [status|entries|clear]\r\nInspect the subsegment module: options, leaderboard entries, or clear runtime state.";
                 case "marker":
-                    return "twi marker [list|feed|add <range|checkpoint|grab> ...|remove <id>|toggle <id>|pb <total_ms>|pbclear|clear|save|reload]\r\nInspect/edit the current level's marker set.";
+                    return "twitimer marker [list|feed|add <range|checkpoint|grab> ...|remove <id>|toggle <id>|pb <total_ms>|pbclear|clear|save|reload]\r\nInspect/edit the current level's marker set.";
                 case "flags":
-                    return "twi flags [list|raise <Reason>|clear [forgivable|soft|all]]\r\nInspect or mutate validity flags for testing (R5).";
+                    return "twitimer flags [list|raise <Reason>|clear [forgivable|soft|all]]\r\nInspect or mutate validity flags for testing (R5).";
                 case "lc":
-                    return "twi lc [status|restart]\r\nInspect LevelCollections integration or dispatch 'lc restart'.";
+                    return "twitimer lc [status|restart]\r\nInspect LevelCollections integration or dispatch 'lc restart'.";
                 case "config":
-                    return "twi config [path|files]\r\nPrint TwilightTimer config paths.";
+                    return "twitimer config [path|files]\r\nPrint TwilightTimer config paths.";
                 case "match":
-                    return "twi match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]\r\nDrive Twilight Cup match mode and round lifecycle directly through TwilightTimerApi (synchronous debug surface).";
+                    return "twitimer match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]\r\nDrive Twilight Cup match mode and round lifecycle directly through TwilightTimerApi (synchronous debug surface).";
                 case "sim":
-                    return "twi sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events [on|off|status]]\r\nDrive the registered ITimerProvider adapter; mutations are queued and applied by 'twi sim drain' or the next TimerCore.Update.";
+                    return "twitimer sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events [on|off|status]]\r\nDrive the registered ITimerProvider adapter; mutations are queued and applied by 'twitimer sim drain' or the next TimerCore.Update.";
                 default:
-                    return "Unknown TwilightTimer command topic: " + topic + ". Type 'twi' for the command list.";
+                    return "Unknown TwilightTimer command topic: " + topic + ". Type 'twitimer' for the command list.";
             }
         }
     }
