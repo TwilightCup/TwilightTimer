@@ -14,12 +14,14 @@ namespace TwilightTimer
     /// to both modes; the mode-cycle key (<c>SubsegmentToggleKey</c>) lives
     /// here and cycles: hidden → Subsegment → Markers → hidden.
     ///
-    /// During a match session (T7.6) the standalone show/hide state and
-    /// center anchor are overridden: the HUD is shown exactly while the
-    /// match leaderboard (<see cref="MatchLeaderboardHud"/>) is shown, and it
-    /// hangs directly below that block instead of at the screen center. The
-    /// mode-cycle key is disabled for the whole match session so the
-    /// competition display cannot be flipped by a stray keypress.
+    /// During a match session (T7.6) the standalone cycle state is ignored
+    /// entirely: the HUD is shown exactly while the match leaderboard
+    /// (<see cref="MatchLeaderboardHud"/>) is shown, it hangs directly below
+    /// that block instead of at the screen center, and its content is forced
+    /// to Markers (subsegment stays force-disabled per T7.5, so the saved
+    /// Subsegment mode would otherwise leave the block empty). The mode-cycle
+    /// key is disabled for the whole match session so the competition display
+    /// cannot be flipped by a stray keypress.
     /// </summary>
     public sealed class LeaderboardHud : MonoBehaviour
     {
@@ -165,7 +167,15 @@ namespace TwilightTimer
 
             if (!shown) return;
 
-            bool markersMode = string.Equals(cfg.Layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase);
+            // T7.6: the whole cycle state (hidden/Subsegment/Markers) is
+            // ignored while a match is active. Visibility already follows the
+            // match leaderboard above; content is forced to Markers because
+            // T7.5 keeps the subsegment module force-disabled for the whole
+            // session, so a user whose saved mode is "Subsegment" (the
+            // default) would otherwise get an empty block — and the cycle key
+            // is disabled in a match, so they could not switch out of it.
+            bool markersMode = MatchMode.Active
+                || string.Equals(cfg.Layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase);
             if (markersMode)
                 DrawMarkers(cfg, LastTopY);
             else

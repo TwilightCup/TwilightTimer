@@ -187,7 +187,8 @@ seat_b_color = FF5A5AFF
 While a match session is active the shared leaderboard (subsegment / markers
 content, left edge) is subordinated to this one: it is shown only while the
 match leaderboard is shown and hangs directly below it, instead of at the
-screen centre and under its own toggle state. The shared leaderboard's
-mode-cycle key is disabled for the whole match session. Subsegment content
-stays force-disabled during the match (T7.5), so only markers mode can
-produce rows there. See [TWILIGHT_CUP.md](TWILIGHT_CUP.md) T7.6.
+screen centre and under its own cycle state. The shared leaderboard's
+mode-cycle key is disabled for the whole match session, and its content mode
+is forced to Markers: subsegment stays force-disabled during the match
+(T7.5), so a saved Subsegment mode would otherwise leave the block empty.
+See [TWILIGHT_CUP.md](TWILIGHT_CUP.md) T7.6.
