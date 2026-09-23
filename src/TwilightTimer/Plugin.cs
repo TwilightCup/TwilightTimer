@@ -37,6 +37,12 @@ namespace TwilightTimer
             SettingsPanelTabRegistry.Init(new SettingsPanelTabRegistry());
             config.SettingsSaved += SettingsPanelTabRegistry.Instance.NotifySettingsSaved;
 
+            // 1.1 Resolve the active config directory (fork's own vs. upstream
+            //     HSRTimer) before seeding/reading anything; the switch file lives
+            //     in the fork's own dir, so this is unambiguous. ConfigService.Load
+            //     re-runs it (idempotent).
+            PersistenceService.LoadDirectorySwitch();
+
             EnsureDefaultLangFiles();
             config.Load();
             // Detect & fill in missing/incorrect config items before any

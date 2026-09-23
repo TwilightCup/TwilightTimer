@@ -11,6 +11,7 @@ This file contains user-facing release notes for TwilightTimer. Only changes tha
   - Fixed the manual reset and one-key retry hotkeys still firing while a text input was open (for example the in-game chat), which could silently reset or restart a run while typing.
   - The local subsegment comparison is now disabled automatically for the whole duration of a Twilight Cup match: no sampling, reference comparison, leaderboard display, or PB writes run during competition. The user's subsegment setting is left untouched and the feature returns after the match; a level that was suppressed at any point is not recorded.
   - During a Twilight Cup match, the shared leaderboard (subsegment/markers) now hangs directly below the in-match player leaderboard and is shown/hidden together with it, instead of sitting at the screen centre under its own toggle; its cycle key is disabled for the whole match session.
+  - Added an optional HSRTimer config-directory source. When `BepInEx/config/HSRTimer/` exists, the General tab shows a **Config source** section with a *Use HSRTimer config directory* toggle; enabling it makes the plugin read and write all config (settings, tags, layout, language, presets, subsegments, markers) in the upstream `config/HSRTimer/` directory instead of `config/TwilightTimer/`. The change applies immediately and is disabled during a match. The switch is stored in `config/TwilightTimer/config_dir.ini` and can also be controlled with `twitimer config source ...`.
 - **Contributors:** _To be filled from PRs merged into dev._
 
 ## 1.5.0

@@ -210,7 +210,8 @@ namespace TwilightTimer
             var lc = LcIntegration.Instance;
             sb.AppendLine($"lc={(lc != null && lc.Enabled ? "enabled" : "absent")} inRun={lc != null && lc.IsInCollectionRun} lastLevel={lc != null && lc.IsLastLevelOfCollection} name=\"{lc?.CollectionName}\"");
 
-            sb.Append("configDir=").Append(PersistenceService.PluginDir);
+            sb.Append("configDir=").Append(PersistenceService.PluginDir)
+              .Append(" source=").Append(PersistenceService.UseHsrtimer ? "HSRTimer" : "TwilightTimer");
             Print(sb.ToString());
         }
 
@@ -1384,10 +1385,65 @@ namespace TwilightTimer
                     Print("lang dir: " + PersistenceService.LangDir);
                     Print("presets dir: " + PresetStore.RootDir);
                     break;
+                case "source":
+                case "hsrtimer":
+                    CmdConfigSource(args.GetRange(1, args.Count - 1));
+                    break;
                 default:
-                    Print("Usage: twitimer config [path|files]");
+                    Print("Usage: twitimer config [path|files|source [status|hsrtimer|twilighttimer|toggle]]");
                     break;
             }
+        }
+
+        /// <summary>
+        /// Config directory source switch: read/write all config either in the
+        /// fork's own <c>config/TwilightTimer/</c> or the upstream
+        /// <c>config/HSRTimer/</c> directory. Applies live; refused during a match.
+        /// </summary>
+        private static void CmdConfigSource(List<string> args)
+        {
+            var cfg = ConfigService.Instance;
+            if (cfg == null) { Print("TwilightTimer config is not ready."); return; }
+
+            string action = args.Count > 0 ? args[0].ToLowerInvariant() : "status";
+            switch (action)
+            {
+                case "status":
+                case "current":
+                    PrintConfigSource(cfg);
+                    break;
+                case "hsrtimer":
+                case "on":
+                case "true":
+                case "enable":
+                    if (!cfg.HsrtimerConfigDirExists)
+                    {
+                        Print("HSRTimer config dir does not exist: " + PersistenceService.HsrtimerDir);
+                        return;
+                    }
+                    cfg.SetUseHsrtimerConfig(true);
+                    PrintConfigSource(cfg);
+                    break;
+                case "twilighttimer":
+                case "off":
+                case "false":
+                case "disable":
+                    cfg.SetUseHsrtimerConfig(false);
+                    PrintConfigSource(cfg);
+                    break;
+                case "toggle":
+                    cfg.SetUseHsrtimerConfig(!cfg.UseHsrtimerConfig);
+                    PrintConfigSource(cfg);
+                    break;
+                default:
+                    Print("Usage: twitimer config source [status|hsrtimer|twilighttimer|toggle]");
+                    break;
+            }
+        }
+
+        private static void PrintConfigSource(ConfigService cfg)
+        {
+            Print($"config source = {(cfg.UseHsrtimerConfig ? "HSRTimer" : "TwilightTimer")} dir={cfg.ConfigDir} hsrtimerDirExists={cfg.HsrtimerConfigDirExists}");
         }
 
         // ── Twilight Cup match / provider (fork-only features) ─────────────
@@ -2112,7 +2168,7 @@ namespace TwilightTimer
             sb.AppendLine("  twitimer sub [status|entries|clear]");
             sb.AppendLine("  twitimer marker [list|feed|add ...|remove <id>|toggle <id>|pb <ms>|pbclear|clear|save|reload]");
             sb.AppendLine("  twitimer flags [list|raise <Reason>|clear [forgivable|soft|all]]");
-            sb.AppendLine("  twitimer lc [status|restart] | twitimer config [path|files]");
+            sb.AppendLine("  twitimer lc [status|restart] | twitimer config [path|files|source ...]");
             sb.AppendLine("  twitimer match [status|enter|exit|start ...|resume ...|stop|tags ...|segments|leaderboard|penalty]");
             sb.AppendLine("  twitimer sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events ...]");
             Print(sb.ToString());
@@ -2165,7 +2221,7 @@ namespace TwilightTimer
                 case "lc":
                     return "twitimer lc [status|restart]\r\nInspect LevelCollections integration or dispatch 'lc restart'.";
                 case "config":
-                    return "twitimer config [path|files]\r\nPrint TwilightTimer config paths.";
+                    return "twitimer config [path|files|source [status|hsrtimer|twilighttimer|toggle]]\r\nPrint config paths or switch the config source between config/TwilightTimer/ and config/HSRTimer/ (applies live; refused during a match).";
                 case "match":
                     return "twitimer match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]\r\nDrive Twilight Cup match mode and round lifecycle directly through TwilightTimerApi (synchronous debug surface).";
                 case "sim":

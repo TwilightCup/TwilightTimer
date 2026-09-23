@@ -14,6 +14,44 @@ with a logged warning that names the file and line number. The plugin never
 fails to start because of one bad line (spec N6). Missing keys fall back to
 defaults.
 
+## Config directory selection (HSRTimer compatibility)
+
+TwilightTimer is a fork of HSRTimer and keeps the same config file format, so a
+user coming from the mainline plugin can point TwilightTimer straight at the
+existing `config/HSRTimer/` directory instead of the fork's own
+`config/TwilightTimer/`.
+
+When `config/HSRTimer/` exists, the General tab of the settings panel shows a
+**Config source** section with a *Use HSRTimer config directory* toggle. Turning
+it on makes TwilightTimer read **and** write every config file — `settings.ini`,
+`tags.ini`, `layout.ini`, `lang/`, `presets/`, `subsegment/`, `markers/` — in
+`config/HSRTimer/` instead of `config/TwilightTimer/`. The change applies
+immediately (the config is re-read on the spot) and is refused during a Twilight
+Cup match round, because reloading `tags.ini` would overwrite the pushed round
+tag set.
+
+The toggle itself is stored in the fork's own
+`config/TwilightTimer/config_dir.ini`, not in `settings.ini`, so it can always be
+read at boot (before the active directory is known) and it survives switching
+back and forth:
+
+```ini
+[config]
+use_hsrtimer = false
+```
+
+From the in-game console:
+
+```
+twitimer config source status        # print the active source + directory
+twitimer config source hsrtimer      # read/write config/HSRTimer/
+twitimer config source twilighttimer # read/write config/TwilightTimer/
+twitimer config source toggle
+```
+
+> If the `config/HSRTimer/` directory does not exist, the toggle is not shown and
+> the fork's own directory is always used.
+
 ## settings.ini
 
 ```ini

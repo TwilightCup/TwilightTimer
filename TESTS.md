@@ -58,7 +58,7 @@ persist to the normal `settings.ini` / `tags.ini` / `layout.ini` files.
 | `twitimer marker [list\|feed\|add ...\|remove <id>\|toggle <id>\|pb <ms>\|pbclear\|clear\|save\|reload]` | Inspect/edit markers (R10) |
 | `twitimer flags [list\|raise <Reason>\|clear [forgivable\|soft\|all]]` | Inspect/mutate validity flags (R5) |
 | `twitimer lc [status\|restart]` | Inspect LevelCollections integration or dispatch `lc restart` |
-| `twitimer config [path\|files]` | Print TwilightTimer config paths |
+| `twitimer config [path\|files\|source [status\|hsrtimer\|twilighttimer\|toggle]]` | Print TwilightTimer config paths or switch the config source directory |
 | `twitimer match [status\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|segments\|leaderboard\|penalty]` | Drive Twilight Cup match mode / round lifecycle through `TwilightTimerApi` (synchronous debug surface) |
 | `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|events ...]` | Drive the registered `ITimerProvider` adapter and mirror its outbound events to the log |
 
@@ -275,6 +275,22 @@ twitimer config files
 
 These print the exact paths used by the plugin so you can verify or edit files
 on disk.
+
+The config source can be switched between the fork's own directory and the
+upstream HSRTimer directory (only when `config/HSRTimer/` exists; refused during
+a match round):
+
+```text
+twitimer config source status
+twitimer config source hsrtimer
+twitimer config path          # now reports config/HSRTimer/
+twitimer set show_hud false   # writes settings.ini in config/HSRTimer/
+twitimer config source twilighttimer
+```
+
+`twitimer status` also reports `source=TwilightTimer|HSRTimer` at the end of its
+`configDir=` line. The switch itself is stored in
+`config/TwilightTimer/config_dir.ini` (`[config] use_hsrtimer`).
 
 ### 13. Twilight Cup match mode / round lifecycle (T2–T5)
 

@@ -9,6 +9,30 @@
 
 每个文件都**逐行容错解析**:格式错误的行会被跳过,并在日志中给出文件名与行号的警告。插件绝不会因一行错误而无法启动(规格 N6)。缺失的键回退到默认值。
 
+## 配置目录选择(HSRTimer 兼容)
+
+TwilightTimer 是 HSRTimer 的 fork,配置文件格式完全相同,因此从主线下游迁移过来的用户可以让 TwilightTimer 直接使用原有的 `config/HSRTimer/` 目录,而不是 fork 自己的 `config/TwilightTimer/`。
+
+当 `config/HSRTimer/` 目录存在时,设置面板的「常规」标签页会显示一个**配置来源**分组,内含「使用 HSRTimer 配置目录」开关。开启后,TwilightTimer 的所有配置读写 —— `settings.ini`、`tags.ini`、`layout.ini`、`lang/`、`presets/`、`subsegment/`、`markers/` —— 都会改在 `config/HSRTimer/` 中进行。改动立即生效(当场重新读取配置);比赛回合进行中会拒绝切换,因为重新加载 `tags.ini` 会覆盖当前回合推送的标签集。
+
+开关本身存放在 fork 自己的 `config/TwilightTimer/config_dir.ini` 中(不放在 `settings.ini`),这样启动时在确定活动目录之前就能读到它,来回切换也不会丢失:
+
+```ini
+[config]
+use_hsrtimer = false
+```
+
+游戏内控制台命令:
+
+```
+twitimer config source status        # 打印当前来源与目录
+twitimer config source hsrtimer      # 读写 config/HSRTimer/
+twitimer config source twilighttimer # 读写 config/TwilightTimer/
+twitimer config source toggle
+```
+
+> 若 `config/HSRTimer/` 目录不存在,则不显示该开关,始终使用 fork 自己的目录。
+
 ## settings.ini
 
 ```ini

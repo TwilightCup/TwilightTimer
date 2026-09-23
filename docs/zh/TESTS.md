@@ -46,7 +46,7 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 | `twitimer marker [list\|feed\|add ...\|remove <id>\|toggle <id>\|pb <ms>\|pbclear\|clear\|save\|reload]` | 查看 / 编辑标记(R10) |
 | `twitimer flags [list\|raise <Reason>\|clear [forgivable\|soft\|all]]` | 查看 / 修改有效性标记(R5) |
 | `twitimer lc [status\|restart]` | 查看 LevelCollections 集成或触发 `lc restart` |
-| `twitimer config [path\|files]` | 打印 TwilightTimer 配置路径 |
+| `twitimer config [path\|files\|source [status\|hsrtimer\|twilighttimer\|toggle]]` | 打印 TwilightTimer 配置路径,或切换配置来源目录 |
 | `twitimer match [status\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|segments\|leaderboard\|penalty]` | 通过 `TwilightTimerApi`(同步调试面)驱动黄昏杯比赛模式 / 回合生命周期 |
 | `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|events ...]` | 驱动已注册的 `ITimerProvider` 适配器,并把其对外事件镜像到日志 |
 
@@ -247,6 +247,18 @@ twitimer config files
 ```
 
 打印插件使用的确切路径,方便你在磁盘上核对或编辑文件。
+
+配置来源可在 fork 自己的目录与上游 HSRTimer 目录之间切换(仅当 `config/HSRTimer/` 存在时可用;比赛回合中会拒绝):
+
+```text
+twitimer config source status
+twitimer config source hsrtimer
+twitimer config path          # 此时显示 config/HSRTimer/
+twitimer set show_hud false   # settings.ini 写入 config/HSRTimer/
+twitimer config source twilighttimer
+```
+
+`twitimer status` 也会在末尾的 `configDir=` 行报告 `source=TwilightTimer|HSRTimer`。开关本身存放在 `config/TwilightTimer/config_dir.ini`(`[config] use_hsrtimer`)。
 
 ### 13. 黄昏杯比赛模式 / 回合生命周期(T2–T5)
 

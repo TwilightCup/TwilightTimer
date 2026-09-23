@@ -305,6 +305,31 @@ namespace TwilightTimer
             Section(loc.Get("SETTINGS_PRESET"));
             DrawPresetSelector(cfg, loc);
 
+            // Config-source switch: only offered when an upstream HSRTimer config
+            // directory exists to switch to. Locked during a match (T5.3).
+            if (cfg.HsrtimerConfigDirExists)
+            {
+                Section(loc.Get("PANEL_CONFIG_SOURCE"));
+                GUI.enabled = !locked;
+                bool useHsrtimer = cfg.UseHsrtimerConfig;
+                bool nextUseHsrtimer = Toggle(loc.Get("SETTINGS_USE_HSRTIMER_CONFIG"), useHsrtimer);
+                GUI.enabled = true;
+                if (nextUseHsrtimer != useHsrtimer)
+                {
+                    cfg.SetUseHsrtimerConfig(nextUseHsrtimer);
+                    // The whole config (language, layout, presets) was swapped;
+                    // drop every cached UI buffer so it re-reads the new files.
+                    _colorHexBuf.Clear();
+                    _pendingRebind = null;
+                    _presetDropdownOpen = false;
+                    _langDropdownOpen = false;
+                    RefreshLanguageList();
+                    RefreshPresetList();
+                    RefreshTabDisplays();
+                }
+                GUILayout.Label(loc.Get("SETTINGS_USE_HSRTIMER_CONFIG_NOTE"), _small);
+            }
+
             Section(loc.Get("PANEL_KEYBINDS"));
             // T7.4/T7.1: the reset and retry keys are disabled in match mode
             // (rebinding them would be pointless — they log-only during a

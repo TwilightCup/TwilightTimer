@@ -42,12 +42,97 @@ namespace TwilightTimer
     /// </summary>
     public static class PersistenceService
     {
-        /// <summary>The plugin's runtime directory under the BepInEx config root.</summary>
-        public static string PluginDir => System.IO.Path.Combine(Paths.ConfigPath, PluginInfo.PLUGIN_GUID);
+        /// <summary>
+        /// Upstream mainline plugin id. TwilightTimer is a fork of HSRTimer and
+        /// shares its config file format, so a user migrating from HSRTimer can
+        /// point TwilightTimer at that directory instead of the fork's own.
+        /// </summary>
+        public const string HsrtimerGuid = "HSRTimer";
+
+        /// <summary>The fork's own config directory under the BepInEx config root.</summary>
+        public static string TwilightTimerDir => System.IO.Path.Combine(Paths.ConfigPath, PluginInfo.PLUGIN_GUID);
+
+        /// <summary>The upstream HSRTimer config directory (shared format).</summary>
+        public static string HsrtimerDir => System.IO.Path.Combine(Paths.ConfigPath, HsrtimerGuid);
+
+        /// <summary>Whether the HSRTimer config directory currently exists on disk.</summary>
+        public static bool HsrtimerDirExists
+        {
+            get
+            {
+                try { return Directory.Exists(HsrtimerDir); }
+                catch { return false; }
+            }
+        }
+
+        // The active config directory. Null until LoadDirectorySwitch runs; the
+        // getter falls back to the fork's own dir so early callers are safe.
+        private static string _pluginDir;
+        private static bool _useHsrtimer;
+
+        /// <summary>True while the HSRTimer directory is selected as the config source.</summary>
+        public static bool UseHsrtimer => _useHsrtimer;
+
+        /// <summary>
+        /// The directory every config file is read from and written to. Switches
+        /// to <see cref="HsrtimerDir"/> while the directory-selection switch is on
+        /// and that directory exists; otherwise <see cref="TwilightTimerDir"/>.
+        /// </summary>
+        public static string PluginDir => _pluginDir ?? TwilightTimerDir;
 
         public static string LangDir => System.IO.Path.Combine(PluginDir, "lang");
 
         public static string PathFor(string fileName) => System.IO.Path.Combine(PluginDir, fileName);
+
+        /// <summary>
+        /// The directory-selection switch. It deliberately lives in the fork's
+        /// OWN directory (not the active one), so it can be read before the
+        /// active directory is known and survives switching back and forth.
+        /// </summary>
+        public static string DirectorySwitchFile => System.IO.Path.Combine(TwilightTimerDir, "config_dir.ini");
+
+        private const string DirectorySwitchSection = "config";
+        private const string UseHsrtimerKey = "use_hsrtimer";
+
+        /// <summary>
+        /// Read the directory-selection switch and recompute the active config
+        /// directory. Called at plugin boot before any config is read.
+        /// </summary>
+        public static void LoadDirectorySwitch()
+        {
+            bool use = false;
+            foreach (var p in Read(DirectorySwitchFile))
+            {
+                if (string.IsNullOrEmpty(p.Section) || p.Section == DirectorySwitchSection)
+                {
+                    if (p.Key == UseHsrtimerKey)
+                        use = SettingsModel.ParseBool(p.Value, false);
+                }
+            }
+            _useHsrtimer = use;
+            RefreshPluginDir();
+        }
+
+        /// <summary>
+        /// Persist the directory-selection switch and recompute the active config
+        /// directory. Writing happens in the fork's own dir, so a switch back to
+        /// the TwilightTimer directory later is still possible.
+        /// </summary>
+        public static void SaveDirectorySwitch(bool useHsrtimer)
+        {
+            _useHsrtimer = useHsrtimer;
+            RefreshPluginDir();
+            var section = new Dictionary<string, string> { [UseHsrtimerKey] = useHsrtimer ? "true" : "false" };
+            Write(
+                DirectorySwitchFile,
+                new[] { new KeyValuePair<string, IDictionary<string, string>>(DirectorySwitchSection, section) },
+                "TwilightTimer config directory selection.\n" +
+                "use_hsrtimer = true  -> read/write all config in BepInEx/config/HSRTimer/ (upstream format).\n" +
+                "use_hsrtimer = false -> read/write all config in BepInEx/config/TwilightTimer/.");
+        }
+
+        private static void RefreshPluginDir()
+            => _pluginDir = (_useHsrtimer && HsrtimerDirExists) ? HsrtimerDir : TwilightTimerDir;
 
         /// <summary>Read all lines of a file as parsed entries; returns empty on missing file.</summary>
         public static IEnumerable<ParsedLine> Read(string filePath)
