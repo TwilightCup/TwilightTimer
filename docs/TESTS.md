@@ -60,7 +60,7 @@ persist to the normal `settings.ini` / `tags.ini` / `layout.ini` files.
 | `twitimer lc [status\|restart]` | Inspect LevelCollections integration or dispatch `lc restart` |
 | `twitimer config [path\|files\|source [status\|hsrtimer\|twilighttimer\|toggle]]` | Print TwilightTimer config paths or switch the config source directory |
 | `twitimer match [status\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|segments\|leaderboard\|penalty]` | Drive Twilight Cup match mode / round lifecycle through `TwilightTimerApi` (synchronous debug surface) |
-| `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|events ...]` | Drive the registered `ITimerProvider` adapter and mirror its outbound events to the log |
+| `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|resolvetag ...\|events ...]` | Drive the registered `ITimerProvider` adapter, resolve server tag strings, and mirror its outbound events to the log |
 
 ## Keys accepted by `twitimer get` / `twitimer set`
 
@@ -408,6 +408,19 @@ twitimer sim events off
   the outbound event sequence can be verified.
 - `twitimer sim start/resume/stop/tags` call the interface methods; `twitimer sim drain`
   runs the queued main-thread actions immediately.
+- `twitimer sim resolvetag <serverTag...>` runs the same mapping TwilightCore uses
+  when it ingests a `round_start` pick (`ITimerTagProvider.ResolveServerTag`), so
+  it proves which server CT tag strings the provider accepts. Registered tags
+  match loosely: `Glitchless`, `glitchless`, `No EC`, `no-checkpoint`,
+  `NoCheckpoint` all resolve; unregistered strings print `<unsupported>`. Use it
+  to confirm an extension tag added via `TagRuleRegistry` is receivable from the
+  server too.
+
+```text
+twitimer sim resolvetag Glitchless "No Checkpoint" "No EC" Voiceline Pinch
+# Glitchless -> Glitchless   (No Checkpoint -> NoCheckpoint, No EC -> NoEC,
+# Voiceline -> Voiceline,     Pinch -> <unsupported>)
+```
 
 ### 16. Shared leaderboard under the match leaderboard (T7.6)
 

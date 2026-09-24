@@ -47,10 +47,14 @@ Level Collections 引擎），并作为其计时引擎。所有比赛相关能�
 
 ## 标签推送（T5）
 
-推送的标签 id 经 `TagRuleRegistry` 校验；不支持的 id（Glitchless / Pinch /
-No EC / Achievement 及任何未知 id）记日志并忽略。支持映射：`Checkpoint`、
-`NoCheckpoint`、`Jumpless`（另有非 CT 内置 `Voiceline`）。推送集显示在
-HUD 标签行与面板类别页。
+推送的标签 id 经 `TagRuleRegistry` 校验。从服务端词条字符串到规范 id 的映射
+由计时器提供方负责：当提供方实现 TwilightCore 的 `ITimerTagProvider` 时，注册表
+中的每个标签——六个内置标签以及任何第三方扩展标签——都会做宽松匹配（忽略
+大小写、空格、连字符、下划线），因此 `Glitchless`、`No EC` 与扩展标签同样能从
+服务端接收，而不只是 `Checkpoint` / `NoCheckpoint` / `Jumpless`。无法匹配任何
+已注册标签的词条被丢弃（若到达 `SetRoundTags` 也会记日志并忽略，T5.5）。未实现
+该扩展接口的提供方退化为 TwilightCore 内置的三标签映射。推送集显示在 HUD
+标签行与面板类别页。
 
 ## 回合内约束（T7）
 

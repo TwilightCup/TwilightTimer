@@ -1742,11 +1742,14 @@ namespace TwilightTimer
                 case "tags":
                     CmdSimTags(rest);
                     break;
+                case "resolvetag":
+                    CmdSimResolveTag(rest);
+                    break;
                 case "events":
                     CmdSimEvents(rest);
                     break;
                 default:
-                    Print("Usage: twitimer sim [status|drain|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|events [on|off|status]]");
+                    Print("Usage: twitimer sim [status|drain|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|resolvetag <serverTag...>|events [on|off|status]]");
                     break;
             }
         }
@@ -1839,6 +1842,40 @@ namespace TwilightTimer
             var sb = new StringBuilder();
             sb.Append("provider SetRoundTags() queued:");
             AppendTagList(sb, tags);
+            Print(sb.ToString());
+        }
+
+        /// <summary>
+        /// Map server CT tag strings to canonical tag ids through the same
+        /// <see cref="ITimerTagProvider.ResolveServerTag"/> path TwilightCore
+        /// uses when it ingests a round_start pick (T5.4). Lets the console
+        /// prove that Glitchless / NoEC / any registered extension tag is
+        /// receivable from the server without a live match.
+        /// </summary>
+        private static void CmdSimResolveTag(List<string> args)
+        {
+            var provider = RequireSimProvider();
+            if (provider == null) return;
+
+            if (args.Count == 0)
+            {
+                Print("Usage: twitimer sim resolvetag <serverTag...>\r\nMap server CT tag strings (e.g. Glitchless, \"No Checkpoint\", \"No EC\") to canonical registered tag ids; unsupported strings print <unsupported>.");
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append("server tag mapping:");
+            foreach (var raw in args)
+            {
+                foreach (var part in raw.Split(','))
+                {
+                    string s = part.Trim();
+                    if (s.Length == 0) continue;
+                    string id = provider.ResolveServerTag(s);
+                    sb.AppendLine();
+                    sb.Append("  \"").Append(s).Append("\" -> ").Append(id ?? "<unsupported>");
+                }
+            }
             Print(sb.ToString());
         }
 
@@ -2303,7 +2340,7 @@ namespace TwilightTimer
                 case "match":
                     return "twitimer match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]\r\nDrive Twilight Cup match mode and round lifecycle directly through TwilightTimerApi (synchronous debug surface).";
                 case "sim":
-                    return "twitimer sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events [on|off|status]]\r\nDrive the registered ITimerProvider adapter; mutations are queued and applied by 'twitimer sim drain' or the next TimerCore.Update.";
+                    return "twitimer sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|resolvetag <serverTag...>|events [on|off|status]]\r\nDrive the registered ITimerProvider adapter; mutations are queued and applied by 'twitimer sim drain' or the next TimerCore.Update. 'resolvetag' maps server CT tag strings to canonical tag ids through the same path TwilightCore uses for a round_start pick.";
                 case "update":
                     return "twitimer update [status|check|apply|cancel|base [url]]\r\nCheck the GitHub releases feed for a newer TwilightTimer version and optionally download + install it (R13). 'base' sets a session-only repo-base URL override (testing; 'base clear' resets) — the feed and download URLs derive from it. Results are logged to the BepInEx log.";
                 case "about":

@@ -17,6 +17,7 @@ This file contains user-facing release notes for TwilightTimer. Only changes tha
   - Added an **About** tab as the first entry in the settings panel navigation, showing the plugin name, version, the first two lines of the MIT license, and a **GitHub Repository** button that opens the project page. The `twitimer about` console command prints the same information.
   - Added a **Check Update** button on the About tab that checks GitHub Releases (via the project's releases feed, so it works without GitHub API rate limits): it shows the latest release's title and a short summary (release date + Highlights), an **Open Release Page** button for the full notes, and can download and install the new plugin DLL (replacing older copies), prompting you to restart the game after a successful update. The `twitimer update ...` console commands expose the same flow for testing.
   - Fixed the "you are up to date" message on the About tab showing a duplicated `v` prefix (e.g. `vv1.6.0`) instead of `v1.6.0`.
+  - Fixed Twilight Cup server-pushed tags only applying the `Checkpoint` / `NoCheckpoint` / `Jumpless` subset: `Glitchless`, `NoEC` and any tag added by an extension plugin are now received from the server and applied for the round. Server tag strings match loosely, so wording variations such as `No Checkpoint`, `no-checkpoint` or `No EC` resolve correctly. A new `twitimer sim resolvetag ...` console command shows how the server's tag strings map to tags.
 - **Contributors:** _To be filled from PRs merged into dev._
 
 ## 1.5.0

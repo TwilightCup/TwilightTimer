@@ -52,5 +52,30 @@ namespace TwilightTimer
             ITagRule r;
             return id != null && _byId.TryGetValue(id, out r) ? r : null;
         }
+
+        /// <summary>
+        /// Resolve a server-provided tag string (e.g. "No Checkpoint",
+        /// "glitchless", "No EC") to a registered rule's canonical id, or null
+        /// when no rule matches. Matching is case-insensitive and ignores
+        /// spaces/hyphens/underscores so the backend's wording variations all
+        /// land on the same tag. Because this walks the registry, any tag added
+        /// by an extension plugin (R3.7) is resolvable too — the server does not
+        /// need a per-tag mapping table in the core (T5.4).
+        /// </summary>
+        public string ResolveId(string rawTag)
+        {
+            if (string.IsNullOrEmpty(rawTag)) return null;
+            var key = NormalizeKey(rawTag);
+            if (key.Length == 0) return null;
+            foreach (var rule in _byId.Values)
+            {
+                if (!string.IsNullOrEmpty(rule.Id) && NormalizeKey(rule.Id) == key)
+                    return rule.Id;
+            }
+            return null;
+        }
+
+        private static string NormalizeKey(string tag)
+            => tag.ToLowerInvariant().Replace(" ", "").Replace("-", "").Replace("_", "");
     }
 }

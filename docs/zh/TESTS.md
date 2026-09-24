@@ -48,7 +48,7 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 | `twitimer lc [status\|restart]` | 查看 LevelCollections 集成或触发 `lc restart` |
 | `twitimer config [path\|files\|source [status\|hsrtimer\|twilighttimer\|toggle]]` | 打印 TwilightTimer 配置路径,或切换配置来源目录 |
 | `twitimer match [status\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|segments\|leaderboard\|penalty]` | 通过 `TwilightTimerApi`(同步调试面)驱动黄昏杯比赛模式 / 回合生命周期 |
-| `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|events ...]` | 驱动已注册的 `ITimerProvider` 适配器,并把其对外事件镜像到日志 |
+| `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|resolvetag ...\|events ...]` | 驱动已注册的 `ITimerProvider` 适配器,解析服务端标签字符串,并把其对外事件镜像到日志 |
 | `twitimer about` | 打印插件名称、版本、许可证声明与仓库 URL(R12) |
 | `twitimer update [status\|check\|apply\|cancel\|base [url]]` | 从 GitHub releases 检测 / 安装插件更新(R13) |
 
@@ -355,6 +355,17 @@ twitimer sim events off
   `IncompleteExit`、`InvalidMarked` 镜像到 BepInEx 日志,便于核对对外事件序列。
 - `twitimer sim start/resume/stop/tags` 调用接口方法;`twitimer sim drain` 立即执行排队中的
   主线程动作。
+- `twitimer sim resolvetag <serverTag...>` 走 TwilightCore 处理 `round_start` pick 时
+  所用的同一映射(`ITimerTagProvider.ResolveServerTag`),因此可证明提供方接受哪些服务端
+  CT 词条。已注册标签做宽松匹配:`Glitchless`、`glitchless`、`No EC`、`no-checkpoint`、
+  `NoCheckpoint` 均可解析;未注册字符串打印 `<unsupported>`。可用它确认经
+  `TagRuleRegistry` 注册的扩展标签同样能从服务端接收。
+
+```text
+twitimer sim resolvetag Glitchless "No Checkpoint" "No EC" Voiceline Pinch
+# Glitchless -> Glitchless   (No Checkpoint -> NoCheckpoint, No EC -> NoEC,
+# Voiceline -> Voiceline,     Pinch -> <unsupported>)
+```
 
 ### 16. 共享排行榜挂在比赛排行榜下方（T7.6）
 

@@ -102,6 +102,18 @@ also enable it directly in `tags.ini`:
 enabled = NoFall
 ```
 
+### Server-pushed tags
+
+Custom tags are also receivable from the Twilight Cup server. When TwilightCore
+ingests a `round_start` pick it asks the timer provider (this plugin's
+`TwilightTimerProvider`, via `ITimerTagProvider.ResolveServerTag`) to map each
+server tag string to a canonical id, and that lookup walks `TagRuleRegistry`.
+So any id registered here — `NoFall`, for example — is applied when the server
+pushes `NoFall`, `no fall`, or `no-fall` for the round, with no change in
+TwilightCore. Strings that match no registered rule are dropped. Use
+`twitimer sim resolvetag NoFall "no fall"` in the dev console to confirm the
+mapping.
+
 ### Custom invalid reasons
 
 The built-in `InvalidReason` enum covers the standard reasons. For a fully

@@ -19,8 +19,14 @@ namespace TwilightTimer
     /// the Unity main thread. Queries read point-in-time snapshots and never
     /// throw. Internal TimerEvents are re-exposed as the interface's events;
     /// the per-subscriber try/catch lives in TimerEvents (T4.7).
+    ///
+    /// Also implements <see cref="ITimerTagProvider"/>: the tag set is owned by
+    /// <see cref="TagRuleRegistry"/>, so the provider — not TwilightCore — maps
+    /// the server's CT tag strings to canonical ids, letting every registered
+    /// tag (Glitchless / NoEC / Voiceline and any third-party extension) be
+    /// received from the server (T5.4).
     /// </summary>
-    public sealed class TwilightTimerProvider : ITimerProvider, IResumableTimerProvider, IRealtimeTimerProvider
+    public sealed class TwilightTimerProvider : ITimerProvider, IResumableTimerProvider, IRealtimeTimerProvider, ITimerTagProvider
     {
         public static TwilightTimerProvider Instance { get; private set; }
 
@@ -113,6 +119,20 @@ namespace TwilightTimer
 
         public void SetRoundTags(IList<string> tagIds)
             => MainThreadQueue.Enqueue(() => RoundTracker.SetRoundTags(tagIds));
+
+        // ── Server tag resolution (T5.4) ─────────────────────────────
+
+        /// <summary>
+        /// Map a server CT tag string to a canonical registered tag id, or null
+        /// when no registered rule matches. Reads the registry directly (no
+        /// main-thread marshaling needed: the registry is immutable after boot
+        /// and this may be called from TwilightCore's network thread).
+        /// </summary>
+        public string ResolveServerTag(string serverTag)
+        {
+            var registry = TagRuleRegistry.Instance;
+            return registry != null ? registry.ResolveId(serverTag) : null;
+        }
 
         // ── T4.5: queries (point-in-time snapshots, never throw) ─────
 

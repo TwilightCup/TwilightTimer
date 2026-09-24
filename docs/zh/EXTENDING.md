@@ -98,6 +98,15 @@ public class MyPlugin : BaseUnityPlugin
 enabled = NoFall
 ```
 
+### 服务端推送标签
+
+自定义标签同样可以从黄昏杯服务端接收。TwilightCore 处理 `round_start` pick 时会请求
+计时器提供方(本插件的 `TwilightTimerProvider`,经 `ITimerTagProvider.ResolveServerTag`)
+把每个服务端词条字符串映射为规范 id,而该查找会遍历 `TagRuleRegistry`。因此在这里
+注册的任何 id——例如 `NoFall`——在服务端为该回合推送 `NoFall`、`no fall` 或
+`no-fall` 时都会生效,无需改动 TwilightCore。无法匹配任何已注册规则的字符串被丢弃。
+可在开发控制台用 `twitimer sim resolvetag NoFall "no fall"` 确认映射。
+
 ### 自定义无效原因
 
 内置 `InvalidReason` 枚举覆盖标准原因。若需完全自定义原因,可复用内置原因(如 `CheatCode`),或另行建模自己的标记,并通过面板自定义文本机制呈现。(未来版本将提供通用原因注册表;v1 暂请复用内置项。)

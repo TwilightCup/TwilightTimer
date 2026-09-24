@@ -58,11 +58,17 @@ in-round segment is a skip; if the round ends first (StopRound or LC
 
 ## Tag push (T5)
 
-Pushed tag ids validated against `TagRuleRegistry`; unsupported ids
-(Glitchless / Pinch / No EC / Achievement, or anything unknown) are logged
-and ignored. The supported mapping: `Checkpoint`, `NoCheckpoint`,
-`Jumpless` (plus the non-CT built-in `Voiceline`). The pushed set shows on
-the HUD tags line and the panel Category page.
+Pushed tag ids are validated against `TagRuleRegistry`. The mapping from the
+server's CT tag strings to canonical ids is owned by the timer provider: when
+it implements TwilightCore's `ITimerTagProvider`, every tag registered in the
+registry — the six built-ins plus any third-party extension tag — is resolved
+loosely (case-, space-, hyphen- and underscore-insensitive), so `Glitchless`,
+`No EC` and extension tags are received too, not just `Checkpoint` /
+`NoCheckpoint` / `Jumpless`. Strings matching no registered tag are dropped
+(and would also be logged and ignored by `SetRoundTags` if they reached it,
+T5.5). Providers without the extension interface fall back to TwilightCore's
+built-in three-tag map. The pushed set shows on the HUD tags line and the
+panel Category page.
 
 ## In-round constraints (T7)
 
