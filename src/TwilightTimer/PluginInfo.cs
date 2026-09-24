@@ -9,7 +9,7 @@ namespace TwilightTimer
     {
         public const string PLUGIN_GUID = "TwilightTimer";
         public const string PLUGIN_NAME = "TwilightTimer";
-        public const string PLUGIN_VERSION = "0.0.0.0";
+        public const string PLUGIN_VERSION = "1.6.1.0";
 
         /// <summary>Project repository, opened by the About page's link button (R12.4).</summary>
         public const string PLUGIN_REPOSITORY_URL = "https://github.com/TwilightCup/TwilightTimer";

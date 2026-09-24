@@ -2,10 +2,11 @@
 
 This file contains user-facing release notes for TwilightTimer. Only changes that plugin users can observe belong here.
 
-## 0.0.0.0
+## 1.6.1.0
 
-- **Release Date:** Unreleased
-- **Highlights:** _To be filled during version branch preparation._
+- **Release Date:** _24 Sep 2026_
+- **Highlights:**
+  - Initial release
 - **Details:**
   - Added an in-game dev console command set (`twitimer ...`, opened with `~` / `F1`) so every feature — timer, reset/retry, settings, tags, HUD/layout, localization, presets, subsegments, markers, validity flags, LevelCollections integration, and Twilight Cup match/round lifecycle — can be inspected and tested from inside the game. `twitimer match ...` drives the direct debug API, while `twitimer sim ...` drives the registered `ITimerProvider` adapter and can mirror its outbound events to the log. See `docs/TESTS.md`.
   - Fixed the manual reset and one-key retry hotkeys still firing while a text input was open (for example the in-game chat), which could silently reset or restart a run while typing.
@@ -18,7 +19,6 @@ This file contains user-facing release notes for TwilightTimer. Only changes tha
   - Added a **Check Update** button on the About tab that checks GitHub Releases (via the project's releases feed, so it works without GitHub API rate limits): it shows the latest release's title and a short summary (release date + Highlights), an **Open Release Page** button for the full notes, and can download and install the new plugin DLL (replacing older copies), prompting you to restart the game after a successful update. The `twitimer update ...` console commands expose the same flow for testing.
   - Fixed the "you are up to date" message on the About tab showing a duplicated `v` prefix (e.g. `vv1.6.0`) instead of `v1.6.0`.
   - Fixed Twilight Cup server-pushed tags only applying the `Checkpoint` / `NoCheckpoint` / `Jumpless` subset: `Glitchless`, `NoEC` and any tag added by an extension plugin are now received from the server and applied for the round. Server tag strings match loosely, so wording variations such as `No Checkpoint`, `no-checkpoint` or `No EC` resolve correctly. A new `twitimer sim resolvetag ...` console command shows how the server's tag strings map to tags.
-- **Contributors:** _To be filled from PRs merged into dev._
 
 ## 1.5.0
 
