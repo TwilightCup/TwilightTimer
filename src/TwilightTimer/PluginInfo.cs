@@ -1,0 +1,23 @@
+namespace TwilightTimer
+{
+    /// <summary>
+    /// Static plugin identity constants used by the BepInEx plugin attribute
+    /// and surfaced to the UI (e.g. the {version} template variable and the
+    /// settings panel's About page).
+    /// </summary>
+    internal static class PluginInfo
+    {
+        public const string PLUGIN_GUID = "TwilightTimer";
+        public const string PLUGIN_NAME = "TwilightTimer";
+        public const string PLUGIN_VERSION = "1.6.1.0";
+
+        /// <summary>Project repository, opened by the About page's link button (R12.4).</summary>
+        public const string PLUGIN_REPOSITORY_URL = "https://github.com/TwilightCup/TwilightTimer";
+
+        // R12.3: first two non-empty lines of the repository LICENSE file.
+        // License notices are legal text and intentionally not localized; keep
+        // these in sync with LICENSE when the copyright line changes.
+        public const string LICENSE_LINE1 = "MIT License";
+        public const string LICENSE_LINE2 = "Copyright (c) 2026 TwilightTimer contributors";
+    }
+}

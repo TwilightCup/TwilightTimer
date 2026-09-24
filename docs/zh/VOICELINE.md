@@ -2,7 +2,7 @@
 
 > **English (source of truth)**: [../VOICELINE.md](../VOICELINE.md)
 
-**Voiceline** 标签(R3.6)要求玩家触发关卡内的全部剧情旁白。本页说明 HSRTimer 如何检测合规 —— 这是最微妙的标签,因为常见的跳过技巧会留下可检测的痕迹。
+**Voiceline** 标签(R3.6)要求玩家触发关卡内的全部剧情旁白。本页说明 TwilightTimer 如何检测合规 —— 这是最微妙的标签,因为常见的跳过技巧会留下可检测的痕迹。
 
 ## 游戏侧行为
 
@@ -10,7 +10,7 @@
 
 另有一个特殊的剧情音频源,约定名为 **"Easter"**,播放某段特定剧情音频。
 
-## HSRTimer 如何追踪(`VoicelineTracker`)
+## TwilightTimer 如何追踪(`VoicelineTracker`)
 
 1. **进入关卡时** —— 扫描场景:
    - `Object.FindObjectsOfType<NarrativeBlock>()` 记录每个 block 的实例 id 为"待触发"(必须触发)。
@@ -19,12 +19,13 @@
 2. **游玩期间** —— 两个 Harmony 后缀馈入追踪器:
    - `NarrativeBlock.Play()` 后缀 → 标记该 block 为"已触发"(从待触发移除)。幂等(按实例 id 去重)。
    - `SubtitleManager.PlayNarrative(AudioClip)` 后缀 → 若该 clip 为 Easter clip,标记 Easter 为**已播放**,并把本局翻回 satisfied。
+   - 追踪器还会每 tick 轮询 Easter `AudioSource.isPlaying`,因此直接调用 `AudioSource.Play()` 的隐藏彩蛋语音(不经过 `SubtitleManager.PlayNarrative`)也能被计入已触发。
 
 3. **离开关卡时** —— 以下任一情况本局**无效**(原因 `Voiceline`):
    - Easter 音频源存在但从未播放,或
    - 任一 `NarrativeBlock` 从未被触发。
 
-全部旁白达成时,面板显示绿色"全部旁白已触发"提示(R3.6.3)。
+启用 Voiceline 标签时,面板会像 Checkpoint 标签一样显示实时进度 —— `旁白: 已触发数量/总数`(R3.6.3)。
 
 ## 为什么用两路信号
 

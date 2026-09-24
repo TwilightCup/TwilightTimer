@@ -1,0 +1,676 @@
+using Multiplayer;
+using UnityEngine;
+
+namespace TwilightTimer
+{
+    /// <summary>
+    /// The timer engine. A single polling MonoBehaviour drives all timing,
+    /// segment, reset, validity, and tag logic each frame by reading public
+    /// game fields — no game-method patching (see docs/ARCHITECTURE.md).
+    ///
+    /// <see cref="FixedUpdate"/>: accumulation + state-transition detection
+    /// (Appendix B) + per-tick tag rules on segment end.
+    /// <see cref="Update"/>: keybinds (reset/retry/toggle/cycle/reload), the
+    /// cheat-code validator, and the pause-supplement step (which runs in
+    /// Update because timeScale=0 halts FixedUpdate while paused).
+    /// </summary>
+    public class TimerCore : MonoBehaviour
+    {
+        public static TimerCore Instance { get; private set; }
+
+        /// <summary>The single source of truth for displayed values (HUD reads this).</summary>
+        public static RunState State { get; private set; }
+
+        private ConfigService _cfg;
+        private TimingOptions _opt;
+
+        private HumanState _prevHumanState;
+        private bool _prevHumanStateInit;
+
+        private void Awake()
+        {
+            Instance = this;
+            State = new RunState();
+            // T4.6: surface newly-raised invalid marks to round consumers.
+            State.Flags.OnRaised = RoundTracker.OnInvalidRaised;
+            _cfg = ConfigService.Instance;
+            UpdateOptions();
+        }
+
+        private void UpdateOptions() => _opt = TimingOptions.FromSettings(_cfg.Settings);
+
+        /// <summary>Re-read timing options from config (match-mode enter/exit).</summary>
+        internal void RefreshOptions() => UpdateOptions();
+
+        /// <summary>
+        /// Full reset for a new round (T3.1): identical scope to the manual
+        /// reset key (R1.7.1) — clears live timing, last-segment / total /
+        /// last-run snapshots, and ALL invalid marks (a new round is a fresh
+        /// run).
+        /// </summary>
+        internal void FullResetForRound() => DoFullReset(keepLastValues: false);
+
+        // ── Physics step: accumulation + transitions + per-tick rules ───────
+        private void FixedUpdate()
+        {
+            // Always advance the transition cache so a transient null Game.instance
+            // (scene teardown) doesn't leave a stale prev that manufactures a
+            // spurious transition on resume. Treat a null game as Inactive.
+            if (State == null)
+                return;
+
+            Game game = Game.instance;
+            GameState gState = game != null ? game.state : GameState.Inactive;
+            AppSate aState = App.state;
+            bool isLocal = NetGame.isLocal;
+
+            if (game != null)
+            {
+                // Latch the pass-zone flag BEFORE transition handling: a segment
+                // can end on this very frame (the completion/leave flow clears
+                // Game.passedLevel itself before the state flips), so EndSegment
+                // must see that the level was passed while it still could be
+                // observed. (The LC collection-run context is NOT latched here —
+                // it is snapshotted at segment start in StartSegment, because a
+                // per-tick latch gets polluted by LC's synchronous index advance
+                // inside Game.Fall; see StartSegment.)
+                if (State.InSegment && game.passedLevel)
+                    State.LevelPassed = true;
+
+                // Detect transitions first (uses cached prev), then respawns,
+                // then accumulate, then run per-tick rules.
+                HandleTransitions(game, gState, aState, isLocal);
+                TrackRespawn(game, gState);
+                Accumulate(game, gState, aState);
+                TrackWakeUp(game, gState);
+                SubsegmentManager.Instance?.OnPhysicsTick(game, gState, State);
+                MarkersManager.Instance?.OnPhysicsTick(game, gState, State);
+                RunRules(game, gState);
+            }
+
+            State.PrevGameState = gState;
+            State.PrevAppState = aState;
+            State.JustReset = false;
+            State.SegmentJustEnded = false;
+        }
+
+        // ── Per-frame step: validators + pause accumulation + keybinds ──────
+        private void Update()
+        {
+            if (State == null || _cfg == null) return;
+
+            // Drain externally-enqueued actions (T1.4 marshaling).
+            MainThreadQueue.Drain();
+
+            GameState gState = Game.instance != null ? Game.instance.state : GameState.Inactive;
+
+            // Generic always-on validity check (R5.1): cheat codes.
+            GenericValidators.CheckCheat(State.Flags);
+
+            // B.2 pause supplement (always on; runs here because FixedUpdate is
+            // paused when timeScale=0).
+            if (SegmentLogic.ShouldAccumulatePause(gState, State.TimingActive))
+                State.GameTime += Time.unscaledDeltaTime;
+
+            // Subsegment quiet-settle windows run in unscaled time so they
+            // continue through pauses (R8.4.3.4).
+            SubsegmentManager.Instance?.OnUpdate();
+
+            // Markers: flush dirty marker-set edits (R10.5.8).
+            MarkersManager.Instance?.OnUpdate();
+
+            // Real-time clock: unlike game time this is not tied to a playable
+            // state, so it keeps advancing through level loading screens and
+            // while paused. It is still reset/stopped by the same run lifecycle
+            // (start on the first segment, stop when a run completes).
+            if (State.RealTimeActive)
+                State.RealTime += Time.unscaledDeltaTime;
+
+            HandleKeybinds();
+        }
+
+        // ── Transition handling (Appendix B + R1.7 resets) ──────────────────
+        private void HandleTransitions(Game game, GameState gState, AppSate aState, bool isLocal)
+        {
+            // Refresh timing options from the live settings model so toggles made
+            // in the settings panel take effect without requiring a reset/retry.
+            UpdateOptions();
+
+            GameState prevG = State.PrevGameState;
+            AppSate prevA = State.PrevAppState;
+
+            // R1.4 segment end must be recorded BEFORE any R1.7 full-run clear:
+            // the PlayingLevel→Inactive (local) edge is both a segment end (R1.4.1)
+            // and an auto-reset trigger (R1.7.3). Recording is unconditional; only
+            // the clear is gated by the AutoReset option. EndSegment is a no-op when
+            // no segment is active, so this is safe on every other transition.
+            if (SegmentLogic.IsSegmentEnd(prevG, gState, isLocal))
+                EndSegment(game, completed: State.LevelPassed);
+
+            // The real-time clock is deliberately not gated on LoadingLevel:
+            // it must keep counting through cross-level loading. But when the
+            // run exits to menu/lobby (not a retry) outside an LC collection
+            // run, it is no longer actively progressing, so stop the real clock
+            // too. This covers PlayingLevel→Inactive, Paused→Inactive, and
+            // lobby transitions, preventing it from silently counting while
+            // sitting in a menu/lobby even if AutoReset is disabled, while
+            // still letting a collection run's internal transition continue
+            // timing.
+            bool leftRunOutsideCollection = gState == GameState.Inactive
+                && !State.InCollectionRunSegment;
+            bool genuinelyInMenu = gState == GameState.Inactive
+                && aState == AppSate.Menu;
+            bool enteredLobby = aState == AppSate.ServerLobby || aState == AppSate.ClientLobby
+                || aState == AppSate.ServerLoadLobby || aState == AppSate.ClientLoadLobby;
+            if (!State.Retrying && (leftRunOutsideCollection || genuinelyInMenu || enteredLobby))
+                State.RealTimeActive = false;
+
+            // R1.7 auto-reset (honored only when the option is on). Suppressed
+            // during a retry (R6) so reloading the level does not clear the run,
+            // and during a match round (T7.2) so quitting mid-round cannot zero
+            // the round data — the unpassed exit is reported instead (T4.4).
+            // It clears the live timers and the last-segment HUD snapshots too,
+            // so leaving to the menu gives a fresh baseline while keeping the
+            // previous completed run's total as a reference.
+            if (_opt.AutoReset
+                && !RoundTracker.RoundActive
+                && SegmentLogic.IsAutoReset(prevG, gState, prevA, aState, isLocal, State.Retrying))
+            {
+                SubsegmentManager.Instance?.OnRunExit();
+                MarkersManager.Instance?.OnRunExit();
+                DoFullReset(keepLastValues: false, keepLastRun: true);
+                return;
+            }
+
+            // R6.4: latch the Menu→LoadLevel edge for the next segment start.
+            // This fires only on a genuine menu entry (campaign advance and a
+            // retry's reload never pass through Menu — see SegmentLogic.IsMenuEntry),
+            // so the soon-to-start level is the one to remember as the campaign
+            // retry target. The edge is consumed at segment start below.
+            //
+            // A level entered from the menu always begins a brand-new run,
+            // regardless of the AutoReset option, so reset the timer here
+            // (keeping the previous completed run's total as a reference).
+            if (SegmentLogic.IsMenuEntry(prevA, aState))
+            {
+                SubsegmentManager.Instance?.OnRunExit();
+                MarkersManager.Instance?.OnRunExit();
+                DoFullReset(keepLastValues: false, keepLastRun: true);
+                State.MenuEntryPending = true;
+            }
+
+            // R1.2 segment start (level entered / became playable).
+            if (SegmentLogic.IsSegmentStart(prevG, gState, aState))
+            {
+                StartSegment(game);
+            }
+            else if (SegmentLogic.IsResumeFromPause(prevG, gState, State.TimingActive))
+            {
+                // R1.3: resume without resetting the segment start or game time.
+                State.TimingActive = true;
+            }
+        }
+
+        private void StartSegment(Game game)
+        {
+            // A retry is a level-level restart: clear the flag now that the
+            // reloaded level has begun its new segment.
+            State.Retrying = false;
+
+            int cp = game.currentCheckpointNumber;
+            State.BeginSegment(State.GameTime, game.currentLevelNumber, game.currentLevelType, cp);
+            _prevHumanStateInit = false;
+
+            // Snapshot the LC collection-run context AT SEGMENT START, together
+            // with the level-number/type snapshots BeginSegment just took. Both
+            // describe "which level is THIS segment" and must be immune to what
+            // happens later inside the segment: when the second-to-last level is
+            // passed, LC's Harmony patch advances CurrentLevelIndex
+            // synchronously inside Game.Fall — BEFORE the async level load flips
+            // the game state and EndSegment runs. A per-tick latch polled here
+            // would observe the advanced index ("now on the last level") during
+            // that window and wrongly classify the ended segment as the
+            // collection's last level (premature RunCompleted on the
+            // second-to-last pass). Snapshotting at segment start keeps the
+            // judgment segment-scoped: only a segment that BEGAN as the last
+            // level counts as the collection's completion edge. This also
+            // preserves the EndCollectionRun case (the true last level's pass
+            // ends the run synchronously, but the index does not change — the
+            // start snapshot already captured "last level").
+            var lc = LcIntegration.Instance;
+            if (lc != null)
+            {
+                State.InCollectionRunSegment = lc.IsInCollectionRun;
+                State.OnCollectionLastLevel = lc.IsLastLevelOfCollection;
+            }
+            // T3/T4: assign the segment its round ordinal (and resolve a
+            // pending unpassed exit as a skip when another segment follows).
+            RoundTracker.OnSegmentStart();
+            // The Credits level (BuiltIn index == levelCount) is the epilogue of
+            // the campaign run that just finished — not a new run. Mark it so the
+            // HUD keeps showing the recorded LastRun during it and recording
+            // skips it (it has no exit/pass zone). Credits can also appear as a
+            // level INSIDE a collection run (listed in the collection) — that is
+            // an ordinary level of an ongoing run, not an epilogue, so the
+            // collection check (queried live here — no race: a collection Credits
+            // means the run is still active) disqualifies it.
+            bool inCollectionRunNow = LcIntegration.Instance != null
+                && LcIntegration.Instance.IsInCollectionRun;
+            State.InEpilogueSegment = game.currentLevelType == WorkshopItemSource.BuiltIn
+                && game.levelCount > 0
+                && game.currentLevelNumber == game.levelCount
+                && !inCollectionRunNow;
+
+            // Real-time clock starts with the first playable segment of a run and
+            // stays active across level-loading transitions. The Credits epilogue
+            // is not a new run, so it must not restart the real-time clock after
+            // the final level has already stopped it.
+            if (!State.InEpilogueSegment)
+                State.RealTimeActive = true;
+
+            // R6.4: if this segment was entered from the menu and is a playable
+            // campaign level (BuiltIn, within the Intro–Reprise range, not the
+            // Credits epilogue, not part of an LC collection run), remember it
+            // as the campaign retry target. A retry during this run then returns
+            // here even after advancing to later campaign levels. The Credits
+            // level is excluded because it has no gameplay; a collection-run
+            // level is excluded because R6.3 (LC delegation) owns those retries.
+            //
+            // If a fresh menu entry instead starts an EditorPick, Workshop, LC
+            // collection, or Credits level, clear any previously remembered
+            // campaign target. Otherwise a stale BuiltIn target from an earlier
+            // menu-entered campaign run would make RetryAction reload that old
+            // level instead of falling back to the current EditorPick/Workshop
+            // level (R6.4.5).
+            // The MenuEntryPending latch is cleared regardless — it only ever
+            // describes the level that just started.
+            if (State.MenuEntryPending)
+            {
+                bool playableCampaign = game.currentLevelType == WorkshopItemSource.BuiltIn
+                    && game.levelCount > 0
+                    && game.currentLevelNumber >= 0
+                    && game.currentLevelNumber < game.levelCount
+                    && !State.InEpilogueSegment
+                    && !inCollectionRunNow;
+                if (playableCampaign)
+                    State.CampaignRetryLevel = game.currentLevelNumber;
+                else
+                    State.CampaignRetryLevel = -1;
+            }
+            State.MenuEntryPending = false;
+
+            State.Game = game; // cache for the HUD / rules
+
+            // Start/reload the local subsegment module (R8).
+            SubsegmentManager.Instance?.OnLevelStart(game, State);
+
+            // Start/reload the markers module (R10).
+            MarkersManager.Instance?.OnLevelStart(game, State);
+
+            // Fire tag OnLevelEnter for every enabled tag.
+            ForEachEnabledRule(rule => Safe(rule, r => r.OnLevelEnter(MakeContext(game))));
+        }
+
+        private void EndSegment(Game game, bool completed)
+        {
+            // A manual reset clears the active segment (R1.7.1). If the level
+            // later leaves PlayingLevel without a new segment having started,
+            // there is no attempt to finalize: tag OnLevelExit / PB recording
+            // must not run, otherwise stale per-level tag state can re-raise
+            // forgivable invalid flags on the way out.
+            if (!State.InSegment)
+                return;
+
+            double end = State.GameTime;
+            double segStart = State.SegmentStart; // captured before EndSegment mutates it
+            int roundIndex = State.RoundSegmentIndex;
+            bool retrying = State.Retrying;
+
+            // Fire tag OnLevelExit FIRST — but only for a genuine level
+            // completion. A retry or a mid-level quit abandons the level (its
+            // reload/leave drives it through PlayingLevel → Inactive/LoadingLevel,
+            // a segment end); running OnLevelExit then would let the checkpoint
+            // final-check (R4.2) and voiceline-completion check fire against the
+            // abandoned state and spuriously raise INVALID_CHECKPOINT_FINAL /
+            // Voiceline.
+            //
+            // Ordering matters: exit-time marks (e.g. CheckpointFinal after a
+            // skip-rollback rewrote the checkpoint number) must be raised
+            // BEFORE the round tracker freezes the segment's validity verdict
+            // and clears SINGLE-attempt marks — otherwise they land after the
+            // clear and follow the player into the next attempt (and they
+            // belong in the completion-time upload evidence anyway). They must
+            // also precede the subsegment/marker PB writes: a run with any
+            // invalid flag (cheat, skipped checkpoint, missed voiceline, etc.)
+            // must not record subsegment or marker PBs.
+            if (!retrying && completed)
+                ForEachEnabledRule(rule => Safe(rule, r => r.OnLevelExit(MakeContext(game))));
+
+            SubsegmentManager.Instance?.OnLevelEnd(
+                game, State, end, completed, retrying,
+                game != null ? game.state : GameState.Inactive, App.state);
+            MarkersManager.Instance?.OnLevelEnd(
+                game, State, end, completed, retrying,
+                game != null ? game.state : GameState.Inactive, App.state);
+            State.EndSegment(end, completed);
+
+            // T4.1/T4.4: report the segment outcome to the round tracker.
+            // Only genuine outcomes count — a retry reload abandons its
+            // segment without it being a skip or an exit.
+            if (!retrying)
+                RoundTracker.OnSegmentEnd(roundIndex, Ms(end - segStart), Ms(end), completed);
+
+            // R1.6: record the completed run's total time. Three cases count as
+            // "the run is over": (a) the campaign's final level was passed (the
+            // game then loads Credits — levelCount-1 is the last playable level,
+            // levelCount itself is Credits); (b) a standalone EditorPick level
+            // was passed (outside a collection run); (c) the last level of an LC
+            // collection run was passed. All use segment-start snapshots
+            // (CurrentLevelType, InCollectionRunSegment, OnCollectionLastLevel —
+            // captured in StartSegment) because by now the game/LC state has
+            // already moved on to whatever follows.
+            if (!retrying && completed)
+            {
+                bool campaignDone = State.CurrentLevelType == WorkshopItemSource.BuiltIn
+                    && game.levelCount > 0
+                    && State.CurrentLevelNumber == game.levelCount - 1;
+                bool standaloneEditorPick = State.CurrentLevelType == WorkshopItemSource.EditorPick
+                    && !State.InCollectionRunSegment;
+                bool collectionDone = State.OnCollectionLastLevel;
+                if (campaignDone || standaloneEditorPick || collectionDone)
+                {
+                    State.LastRun = end;
+                    // The real-time clock freezes at the same moment the game
+                    // clock records the completed run.
+                    State.RealTimeActive = false;
+                    // T4.3: the whole collection finished — report the
+                    // game-time total to the round tracker.
+                    if (collectionDone)
+                        RoundTracker.OnRunCompleted(Ms(end));
+                }
+            }
+
+            if (!retrying)
+                _cfg.SaveSettings();
+        }
+
+        // ── Wake Up time (per level / per respawn) ────────────────────────
+        /// <summary>
+        /// In the default (respawn-aware) mode, detect a local-player respawn by
+        /// the transition into <c>Spawning</c> and restart the Wake Up Time
+        /// measurement from that instant. Pause-menu Load/Restart are handled by
+        /// Harmony postfixes while FixedUpdate is halted; they call
+        /// <see cref="RestartWakeUpMeasurement"/> and mark this transition cache
+        /// as already seen so this polling path does not double-reset.
+        /// </summary>
+        private void TrackRespawn(Game game, GameState gState)
+        {
+            if (_cfg.Settings.OnlyRecordFirstWakeUpTime)
+                return;
+            if (!State.InSegment || gState != GameState.PlayingLevel)
+                return;
+
+            var human = Human.Localplayer;
+            if (human == null)
+            {
+                _prevHumanStateInit = false;
+                return;
+            }
+
+            if (!_prevHumanStateInit)
+            {
+                _prevHumanState = human.state;
+                _prevHumanStateInit = true;
+                return;
+            }
+
+            var prev = _prevHumanState;
+            if (human.state == HumanState.Spawning && prev != HumanState.Spawning)
+                State.RestartWakeUpMeasurement(State.GameTime);
+            _prevHumanState = human.state;
+        }
+
+        /// <summary>
+        /// Record the current Wake Up Time when the local player leaves the
+        /// soft/spawn state. The duration is measured from
+        /// <see cref="RunState.WakeUpMeasureStart"/>, which is the segment start
+        /// in "only first wake-up" mode and the latest respawn/restart moment in
+        /// the default mode. Once recorded it is not reset by later manual
+        /// play-dead within the same measurement; a new respawn clears it so the
+        /// next wake-up can be measured.
+        /// </summary>
+        private void TrackWakeUp(Game game, GameState gState)
+        {
+            if (State.WakeUpTime.HasValue || !State.InSegment || gState != GameState.PlayingLevel)
+                return;
+            var human = Human.Localplayer;
+            if (human == null)
+                return;
+            if (human.state == HumanState.Spawning || human.state == HumanState.Unconscious || human.state == HumanState.Dead)
+                return;
+
+            State.WakeUpTime = State.GameTime - State.WakeUpMeasureStart;
+        }
+
+        // ── Accumulation (B.1) ─────────────────────────────────────────────
+        private void Accumulate(Game game, GameState gState, AppSate aState)
+        {
+            if (SegmentLogic.ShouldAccumulateFixed(gState, aState, State.TimingActive))
+                State.GameTime += Time.fixedDeltaTime;
+        }
+
+        // ── Per-tick tag rules (skip/jump/nocheckpoint/voiceline-tick) ──────
+        private void RunRules(Game game, GameState gState)
+        {
+            // Tag rules only apply to an active segment. After a manual reset
+            // clears the segment while the level is still PlayingLevel, running
+            // OnTick with stale per-level tag state would immediately re-raise
+            // forgivable invalid flags (e.g. NoCheckpointHit / Jumpless).
+            if (!State.InSegment)
+                return;
+
+            // Track max checkpoint seen for EditorPick final validation.
+            int cp = game.currentCheckpointNumber;
+            if (cp > State.MaxCheckpointThisLevel) State.MaxCheckpointThisLevel = cp;
+            State.PrevCheckpoint = UpdateCheckpointEdge(cp);
+
+            if (gState != GameState.PlayingLevel) return;
+
+            ForEachEnabledRule(rule => Safe(rule, r => r.OnTick(MakeContext(game))));
+        }
+
+        /// <summary>Run an action for each registered rule whose tag is enabled.</summary>
+        private void ForEachEnabledRule(System.Action<ITagRule> action)
+        {
+            if (TagRuleRegistry.Instance == null || _cfg.EnabledTags == null) return;
+            foreach (var tagId in _cfg.EnabledTags.Tags)
+            {
+                var rule = TagRuleRegistry.Instance.Find(tagId);
+                if (rule != null)
+                    action(rule);
+            }
+        }
+
+        // Edge-cache for checkpoint transitions, returning the previous value.
+        private int _cpEdgeCache;
+        private bool _cpEdgeInit;
+        private int UpdateCheckpointEdge(int cp)
+        {
+            int prev = _cpEdgeInit ? _cpEdgeCache : cp;
+            _cpEdgeCache = cp;
+            _cpEdgeInit = true;
+            return prev;
+        }
+
+        private ValidationContext MakeContext(Game game)
+        {
+            return new ValidationContext(
+                State, game,
+                game.currentCheckpointNumber, State.PrevCheckpoint,
+                State.Flags, _cfg.Localization);
+        }
+
+        // ── Keybinds (R1.7.1 reset, R6 retry, settings panel) ──
+        private void HandleKeybinds()
+        {
+            var s = _cfg.Settings;
+
+            // The settings panel key always works (so the user can open/close it).
+            if (InputUtil.GetKeyDown(s.MenuKey))
+            {
+                if (SettingsPanel.Instance != null)
+                    SettingsPanel.Instance.Toggle();
+                return;
+            }
+
+            // While the panel is open, suppress gameplay keybinds so typing /
+            // rebinding inside the panel doesn't reset the run or retry.
+            if (SettingsPanel.Instance != null && SettingsPanel.Instance.IsVisible)
+                return;
+
+            // While any keyboard-capturing UI is open (chat, text input, dialog,
+            // and the in-game dev console), suppress gameplay keybinds. Without
+            // this, typing an 'r' inside 'twitimer status' can trigger a retry,
+            // and Backspace can silently full-reset a run while fixing a typo
+            // (same guard as RetryAction R6.1.2a). This runs before the T7.4
+            // match guard below so that typing in the console/chat during a
+            // round stays completely silent instead of logging a disabled-key
+            // notice for every keystroke.
+            if (MenuSystem.keyboardState != KeyboardState.None)
+                return;
+
+            // T7.4/T7.1: during a match round the reset and retry keys are
+            // disabled — round data must be reported complete, and restarting
+            // the collection (or reloading the level) would violate the match
+            // rules. Log-only, and only while a round is actually in flight.
+            if (MatchMode.Active && RoundTracker.RoundActive)
+            {
+                if (Input.GetKeyDown(s.ResetKey))
+                    Notify("NOTIFY_RESET_DISABLED_MATCH");
+                if (Input.GetKeyDown(s.RetryKey))
+                    Notify("NOTIFY_RETRY_DISABLED_MATCH");
+                return;
+            }
+
+            // T7.6: during the whole match session the shared leaderboard
+            // follows the match leaderboard's visibility, so its cycle key is
+            // disabled (a no-op while round data is protected is not enough —
+            // the key must not flip the display at any point of the match).
+            if (!MatchMode.Active && LeaderboardHud.Instance != null && InputUtil.GetKeyDown(s.SubsegmentToggleKey))
+                LeaderboardHud.Instance.CycleMode();
+
+            if (InputUtil.GetKeyDown(s.ResetKey))
+            {
+                DoFullReset(keepLastValues: false);
+
+                // R1.7.1: a manual reset must clear AND stop the timer.
+                // RunState.Reset zeroes the transition caches, which would make
+                // the still-active PlayingLevel look like a fresh
+                // LoadingLevel/Inactive -> PlayingLevel segment start on the next
+                // FixedUpdate, immediately restarting the timer and re-arming the
+                // Wake Up Time display. Restore the caches to the actual game
+                // state so the timer stays stopped until a real level entry.
+                var game = Game.instance;
+                if (game != null && game.state == GameState.PlayingLevel)
+                {
+                    State.PrevGameState = game.state;
+                    State.PrevAppState = App.state;
+                }
+
+                _cfg.SaveSettings();
+                Notify("NOTIFY_RUN_RESET");
+            }
+            if (InputUtil.GetKeyDown(s.RetryKey))
+            {
+                if (RetryAction.TryExecute(this, State, s, out string key))
+                    UpdateOptions(); // restart may change timing context
+                Notify(key);
+            }
+        }
+
+        /// <summary>
+        /// Public entry point used by the in-game dev console to perform the
+        /// same full-run reset as the reset key.
+        /// </summary>
+        public static void ResetRun()
+        {
+            var core = Instance;
+            if (core == null || State == null)
+                return;
+
+            core.DoFullReset(keepLastValues: false);
+
+            // A manual reset must clear AND stop the timer; restore the
+            // transition caches to the actual game state so the still-active
+            // PlayingLevel does not look like a fresh segment start (mirrors the
+            // reset-key path in HandleKeybinds).
+            var game = Game.instance;
+            if (game != null && game.state == GameState.PlayingLevel)
+            {
+                State.PrevGameState = game.state;
+                State.PrevAppState = App.state;
+            }
+
+            core._cfg?.SaveSettings();
+            core.Notify("NOTIFY_RUN_RESET");
+        }
+
+        /// <summary>Re-read timing options from the live settings model.</summary>
+        public void RefreshTimingOptions() => UpdateOptions();
+
+        /// <summary>
+        /// Public entry point used by pause-menu patches to clear the current
+        /// Wake Up Time and start a fresh measurement from the current game time.
+        /// Also records the current human state as already seen so the normal
+        /// FixedUpdate respawn detection does not immediately restart again.
+        /// </summary>
+        public static void RestartWakeUpMeasurement()
+        {
+            var core = Instance;
+            if (core == null || State == null)
+                return;
+            State.RestartWakeUpMeasurement(State.GameTime);
+            var human = Human.Localplayer;
+            if (human != null)
+            {
+                core._prevHumanState = human.state;
+                core._prevHumanStateInit = true;
+            }
+            else
+            {
+                core._prevHumanStateInit = false;
+            }
+        }
+
+        private void DoFullReset(bool keepLastValues, bool keepLastRun = false)
+        {
+            SubsegmentManager.Instance?.OnRunReset();
+            MarkersManager.Instance?.OnRunReset();
+            State.Reset(keepLastValues, keepLastRun);
+            State.Flags.ClearAll();
+            _cpEdgeInit = false;
+            _prevHumanStateInit = false;
+            UpdateOptions();
+        }
+
+        // ── helpers ──
+        private void Notify(string key, string arg = null)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            string msg = arg != null ? _cfg.Localization.Get(key, arg) : _cfg.Localization.Get(key);
+            Plugin.Logger.LogInfo($"TwilightTimer: {msg}");
+        }
+
+        /// <summary>Seconds → whole milliseconds (game-time reporting).</summary>
+        private static long Ms(double seconds) => (long)System.Math.Round(seconds * 1000d);
+
+        private static void Safe(ITagRule rule, System.Action<ITagRule> action)
+        {
+            try { action(rule); }
+            catch (System.Exception ex)
+            {
+                Plugin.Logger.LogWarning($"TwilightTimer: tag rule '{rule.Id}' threw: {ex.Message}");
+            }
+        }
+    }
+}

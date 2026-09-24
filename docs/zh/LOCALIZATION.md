@@ -2,14 +2,14 @@
 
 > **English (source of truth)**: [../LOCALIZATION.md](../LOCALIZATION.md)
 
-HSRTimer 的界面完全可本地化。英文(`en.txt`)为内置基准;附简体中文示例(`zh-Hans.txt`)。本页同时是翻译贡献者的**指南**(R7.4)。
+TwilightTimer 的界面完全可本地化。英文(`en.txt`)为内置基准;附简体中文示例(`zh-Hans.txt`)。本页同时是翻译贡献者的**指南**(R7.4)。
 
 ## 文件位置与命名
 
 所有翻译文件位于插件运行时目录:
 
 ```
-<BepInEx 配置目录>/HSRTimer/lang/<code>.txt
+<BepInEx 配置目录>/TwilightTimer/lang/<code>.txt
 ```
 
 `<code>` 为 **BCP 47 / IETF 语言标签**:`en`、`zh-Hans`、`ja`、`pt-BR` 等。`en.txt` 为英文基准。英文基准是唯一权威键集 —— 翻译者复制它并翻译值。
@@ -58,9 +58,13 @@ TIMER_SEGMENT_TIME:Segment Time
 
 切换到不存在的语言是安全的:保持当前语言并给出警告(R7.2.4)。
 
+## 外部设置面板标签页的本地化
+
+在 TwilightTimer 设置面板中注册配置标签页的第三方插件,可以通过实现 `ILocalizableSettingsPanelTab`(R9.2)跟随 TwilightTimer 的语言选择。标签页必须内置英文基准(`en`);当 TwilightTimer 当前语言不在该标签页的 `SupportedLanguages` 中时,TwilightTimer 会改为传入 `"en"`。外部标签页的所有文案都应使用上文相同的文件格式与回退顺序。接口、完整约定与示例见 [EXTENDING.md](EXTENDING.md#外部标签页本地化)。
+
 ## 如何贡献翻译
 
-1. 将 `src/HSRTimer/lang/en.txt` 复制为 `src/HSRTimer/lang/<你的代码>.txt`(并复制到 `<配置>/HSRTimer/lang/` 以在游戏内测试)。
+1. 将 `src/TwilightTimer/lang/en.txt` 复制为 `src/TwilightTimer/lang/<你的代码>.txt`(并复制到 `<配置>/TwilightTimer/lang/` 以在游戏内测试)。
 2. 翻译每行右侧。**不要改动键名。**
 3. 将 `__LANG_NAME__:` 设为你的语言显示名。
 4. 可保留分节注释(便于维护)。

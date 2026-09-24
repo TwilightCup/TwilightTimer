@@ -2,7 +2,7 @@
 
 > **中文版**: [zh/LOCALIZATION.md](zh/LOCALIZATION.md)
 
-HSRTimer's UI is fully localizable. English (`en.txt`) is the shipped base; a
+TwilightTimer's UI is fully localizable. English (`en.txt`) is the shipped base; a
 Simplified Chinese example (`zh-Hans.txt`) is included. This page is also the
 **contributor guide** for translators (R7.4).
 
@@ -11,7 +11,7 @@ Simplified Chinese example (`zh-Hans.txt`) is included. This page is also the
 All translation files live in the plugin runtime directory:
 
 ```
-<BepInEx config dir>/HSRTimer/lang/<code>.txt
+<BepInEx config dir>/TwilightTimer/lang/<code>.txt
 ```
 
 `<code>` is a **BCP 47 / IETF language tag**: `en`, `zh-Hans`, `ja`, `pt-BR`,
@@ -71,10 +71,21 @@ English, and an entirely missing English value falls back to the key name.
 Switching to a non-existent language is safe: the current language is kept and a
 warning is logged (R7.2.4).
 
+## Localizing an external settings-panel tab
+
+Third-party plugins that register a configuration tab in TwilightTimer's settings
+panel can follow TwilightTimer's language selection by implementing
+`ILocalizableSettingsPanelTab` (R9.2). The tab must ship English (`en`) as its
+base language; when the active TwilightTimer language is not in the tab's
+`SupportedLanguages`, TwilightTimer passes `"en"` to the tab instead. All external
+tab strings should use the same file format and fallback order described above.
+See [EXTENDING.md](EXTENDING.md#localizing-an-external-tab) for the interface,
+the full contract, and a worked example.
+
 ## How to contribute a translation
 
-1. Copy `src/HSRTimer/lang/en.txt` to `src/HSRTimer/lang/<your-code>.txt`
-   (and into `<config>/HSRTimer/lang/` to test in-game).
+1. Copy `src/TwilightTimer/lang/en.txt` to `src/TwilightTimer/lang/<your-code>.txt`
+   (and into `<config>/TwilightTimer/lang/` to test in-game).
 2. Translate the right-hand side of every line. **Do not change the keys.**
 3. Set `__LANG_NAME__:` to your language's display name.
 4. Keep section comments if you like (they help maintainers).

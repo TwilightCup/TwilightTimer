@@ -1,0 +1,263 @@
+# ===========================================================================
+# TwilightTimer English base language file (authoritative key set)
+# ===========================================================================
+# This is the source of truth for all UI strings. Translators should copy
+# this file as <lang-code>.txt and translate the right-hand side of each line.
+# Format:  KEY:Translation
+#   - Lines starting with '#' are comments and are ignored.
+#   - Blank lines are ignored.
+#   - Use an explicit \n escape for a literal newline inside a value.
+#   - File encoding: UTF-8 (no BOM).
+# See docs/LOCALIZATION.md for the full specification.
+# ===========================================================================
+
+# ===== Special: display name shown in the language selector =====
+__LANG_NAME__:English
+
+# ===== Timer panel row labels (R2.1) =====
+TIMER_GAME_TIME:Game Time
+TIMER_REAL_TIME:Real Time
+TIMER_SEGMENT_TIME:Segment Time
+TIMER_LAST_TOTAL:Total at Last Segment
+TIMER_LAST_SEGMENT:Last Segment
+TIMER_LAST_RUN:Last Run
+TIMER_WAKE_UP_TIME:Wake Up Time
+TIMER_CURRENT_STATE:State
+
+# ===== Current-state display (R2.1.1, debug) =====
+STATE_INACTIVE:Inactive
+STATE_PAUSED:Paused
+STATE_LOADING:Loading
+STATE_PLAYING:Playing
+STATE_UNKNOWN:Unknown
+
+# ===== Settings panel =====
+SETTINGS_LANGUAGE:Language
+SETTINGS_RESET_KEY:Reset Key
+SETTINGS_RETRY_KEY:Retry Key
+SETTINGS_MENU_KEY:Settings Panel Key
+SETTINGS_LEADERBOARD_KEY:Leaderboard Toggle Key
+SETTINGS_AUTO_RESET:Auto-reset run
+SETTINGS_RESTART_CLEARS_FORGIVABLE:Clear forgivable flags on pause-menu restart
+SETTINGS_RETRY_MIN_DWELL:Retry empty-scene dwell (s)
+SETTINGS_RETRY_LEVEL_OVERRIDE_ENABLE:Specify retry level
+SETTINGS_RETRY_LEVEL_OVERRIDE:Retry level (English name or Workshop ID)
+SETTINGS_SHOW_HUD:Show timer HUD
+SETTINGS_SHOW_LEADERBOARD:Show match leaderboard
+SETTINGS_SHOW_REAL_TIME:Show Real Time
+SETTINGS_SHOW_WAKE_UP_TIME:Show Wake Up Time
+SETTINGS_ONLY_RECORD_FIRST_WAKE_UP_TIME:Only record first wake-up time
+SETTINGS_CENTER_LOADING_SAVING:Center Loading/Saving prompts
+SETTINGS_PRESET:Presets
+SETTINGS_PRESET_SELECT_HINT:[Click to select]
+SETTINGS_PRESET_NEW:New preset
+SETTINGS_PRESET_NEW_NAME:Preset name
+SETTINGS_PRESET_CONFIRM:OK
+SETTINGS_PRESET_CANCEL:Cancel
+SETTINGS_PRESET_LOAD:Load preset
+SETTINGS_PRESET_SAVE:Save preset
+SETTINGS_PRESET_DELETE:Delete preset
+SETTINGS_PRESET_EMPTY:Preset name cannot be empty.
+SETTINGS_PRESET_DUPLICATE:A preset with this name already exists.
+SETTINGS_PRESET_LOAD_FAILED:Failed to load the selected preset.
+SETTINGS_PRESET_SAVE_FAILED:Failed to save the selected preset.
+SETTINGS_PRESET_DELETE_FAILED:Failed to delete the selected preset.
+SETTINGS_PRESET_FAILED:Preset operation failed.
+SETTINGS_USE_HSRTIMER_CONFIG:Use HSRTimer config directory
+
+# ===== In-match leaderboard HUD =====
+LEADERBOARD_YOU:You
+
+# ===== Settings panel (GUI) =====
+PANEL_TAB_ABOUT:About
+PANEL_TAB_GENERAL:General
+PANEL_TAB_INTERFACE:Interface
+PANEL_TAB_CATEGORY:Category
+PANEL_TIMING:Timing
+PANEL_HUD:HUD
+PANEL_CONFIG_SOURCE:Config source
+PANEL_TAGS:Rule tags (multi-select)
+PANEL_NO_TAGS:No tag rules registered.
+PANEL_KEYBINDS:Keybinds
+PANEL_OFFSET_X:Offset X
+PANEL_OFFSET_Y:Offset Y
+PANEL_FONT_SIZE:Font size
+PANEL_COLOR_A:Color A
+PANEL_COLOR_B:Color B
+PANEL_COLOR_HEX:Hex
+PANEL_LANG_SELECT_HINT:[Click to select]
+PANEL_RELOAD_LANGUAGE:Reload language files
+PANEL_PRESS_KEY:Press a key...
+PANEL_ABOUT_GITHUB:GitHub Repository
+
+# ===== Plugin update checker (R13) =====
+PANEL_ABOUT_CHECK_UPDATE:Check Update
+PANEL_ABOUT_CHECKING:Checking for updates…
+PANEL_ABOUT_UPDATE_ERROR:Failed to check for updates: {0}
+PANEL_ABOUT_UP_TO_DATE:You are up to date (v{0}).
+PANEL_ABOUT_UPDATE_AVAILABLE:New version available
+PANEL_ABOUT_RELEASE_NOTES:Release notes
+PANEL_ABOUT_OPEN_RELEASE:Open Release Page
+PANEL_ABOUT_UPDATE:Update
+PANEL_ABOUT_DOWNLOADING:Downloading… {0}%
+PANEL_ABOUT_DOWNLOAD_ERROR:Update failed: {0}
+PANEL_ABOUT_UPDATE_DONE:Update installed. Please restart the game.
+
+# ===== Tags =====
+HUD_TAGS_LABEL:Tags
+TAG_CHECKPOINT:Checkpoint
+TAG_NO_CHECKPOINT:No Checkpoint
+TAG_JUMPLESS:Jumpless
+TAG_VOICELINE:Voiceline
+TAG_GLITCHLESS:Glitchless
+TAG_NO_EC:NoEC
+
+# ===== Validity reasons (R5) =====
+INVALID_RUN:RUN IS INVALID
+INVALID_CHEAT_CODE:CHEAT CODES ENABLED
+INVALID_CHECKPOINT_SKIP:CHECKPOINT SKIPPED
+INVALID_CHECKPOINT_FINAL:WRONG FINAL CHECKPOINT
+INVALID_NO_CHECKPOINT:CHECKPOINT WAS TRIGGERED
+INVALID_JUMPLESS:JUMPED
+INVALID_VOICELINE:VOICELINE SKIPPED
+INVALID_SSG:SSG
+INVALID_PROP_FLY:Prop Fly
+INVALID_FOOTSIE:Footsie
+INVALID_EC:EC
+HUD_INVALID_RETRY_TARGET:Specified retry level is invalid
+SEVERITY_UNFORGIVABLE:unforgivable
+SEVERITY_FORGIVABLE:forgivable
+
+# ===== Voiceline tag display (R3.6.3) =====
+VOICELINE_COUNT:Voice
+
+# ===== Checkpoint tag display (R3.3.3) =====
+CHECKPOINT_CURRENT:Checkpoint
+
+# ===== HUD panel labels / template defaults =====
+HUD_PANEL_TITLE:TwilightTimer
+HUD_TOTAL_TIME:Total
+
+# ===== Notifications =====
+NOTIFY_LANGUAGE_RELOADED:Language files reloaded.
+NOTIFY_LANGUAGE_NOT_FOUND:Language not found; keeping current language.
+NOTIFY_LANGUAGE_SWITCHED:Switched language to {0}.
+NOTIFY_RUN_RESET:Run reset.
+NOTIFY_LEVEL_RESTARTED:Level restarted.
+NOTIFY_CAMPAIGN_RESTARTED:Restarted from the level you entered the run on.
+NOTIFY_COLLECTION_RESTARTED:Collection restarted from level 1.
+NOTIFY_RETRY_BLOCKED_INPUT:Retry blocked: a text input is open.
+NOTIFY_RETRY_BLOCKED_STATE:Retry blocked: cannot restart right now.
+NOTIFY_RETRY_TARGET_INVALID:Retry blocked: invalid specified retry level.
+NOTIFY_RETRY_OVERRIDE_RESTARTED:Restarted the specified retry level.
+
+# ===== Template variable fallbacks (R2.4.2) =====
+TEMPLATE_NO_COLLECTION:(no collection)
+TEMPLATE_NO_TAGS:(no tags)
+
+# ===== Twilight Cup match mode (TwilightTimer branch) =====
+PANEL_MATCH_BADGE:Twilight Cup match
+PANEL_MATCH_TAGS_LOCKED:Tags are set by the match pick and cannot be edited during a match.
+PANEL_MATCH_SUBSEGMENT_LOCKED:Subsegment is disabled during a match and cannot be changed here.
+NOTIFY_RESET_DISABLED_MATCH:Reset key disabled during a match round.
+NOTIFY_RETRY_DISABLED_MATCH:Retry key disabled during a match round.
+
+# ===== Subsegment (R8) =====
+PANEL_TAB_SUBSEGMENT:Subsegment
+PANEL_SUBSEGMENT:Subsegment
+SETTINGS_SUBSEGMENT_ENABLE:Enable subsegment time comparison
+SETTINGS_SUBSEGMENT_PB_PATH:PB sample path
+SETTINGS_SUBSEGMENT_LOAD_PATH:Load sample path
+SETTINGS_SUBSEGMENT_TOGGLE_KEY:Leaderboard Mode Cycle Key
+SETTINGS_SUBSEGMENT_MULTI_PROJECT:Multi-run project
+SETTINGS_SUBSEGMENT_DETAILS:Detailed parameters
+SETTINGS_SUBSEGMENT_PLANE_RADIUS:Detection plane radius (m)
+SETTINGS_SUBSEGMENT_MIN_MOVE:Min move (m)
+SETTINGS_SUBSEGMENT_SAMPLE_INTERVAL:Sample interval (s)
+SETTINGS_SUBSEGMENT_QUIET_SETTLE_SECONDS:Quiet settle (s)
+SETTINGS_SUBSEGMENT_PLANE_DEBOUNCE_SECONDS:Plane debounce (s)
+SETTINGS_SUBSEGMENT_RESPAWN_JUMP_METERS:Respawn jump threshold (m)
+SETTINGS_SUBSEGMENT_MAX_LEADERBOARD_ENTRIES:Max leaderboard entries
+SETTINGS_SUBSEGMENT_MAX_SAMPLES_PER_LEVEL:Max samples per level
+SETTINGS_SUBSEGMENT_DEBUG_LOGGING:Debug logging
+SETTINGS_SUBSEGMENT_HUD_FONT_SIZE:Leaderboard font size
+SETTINGS_SUBSEGMENT_HUD_OFFSET_X:Leaderboard X offset
+SETTINGS_SUBSEGMENT_HUD_OFFSET_Y:Leaderboard Y offset (from fixed top anchor)
+
+# ===== Leaderboard (R8.5) =====
+PANEL_TAB_LEADERBOARD:Leaderboard
+PANEL_LEADERBOARD:Leaderboard
+SETTINGS_LEADERBOARD_COLORS:Entry colors
+SETTINGS_LEADERBOARD_COLOR_FASTER:Faster (ahead) color
+SETTINGS_LEADERBOARD_COLOR_SLOWER:Slower (behind) color
+SETTINGS_LEADERBOARD_COLOR_TIE:Tie/no-data color
+SETTINGS_LEADERBOARD_SOURCES:Displayed subsegment sources
+SETTINGS_LEADERBOARD_SOURCE_PB:PB
+SETTINGS_LEADERBOARD_NO_LOAD_DIR:Load directory is empty or missing.
+
+# ===== Leaderboard content mode (R10.7.1) =====
+SETTINGS_LEADERBOARD_MODE:Leaderboard content
+SETTINGS_LEADERBOARD_MODE_SUBSEGMENT:Subsegment
+SETTINGS_LEADERBOARD_MODE_MARKERS:Markers
+SETTINGS_LEADERBOARD_MARKERS_NOTE:Markers mode lists the current level's markers as they trigger (newest on top). Absolute shows each marker's segment time; Relative shows the signed difference to that marker's PB. Colors always show ahead/behind vs PB.
+
+# ===== Markers (R10) =====
+PANEL_TAB_MARKERS:Markers
+PANEL_MARKERS:Markers
+SETTINGS_MARKERS_ENABLE:Enable markers
+SETTINGS_MARKERS_DISABLED_HINT:Markers are disabled. Enable them to edit and use markers.
+SETTINGS_MARKERS_EDIT_MODE:Marker edit mode
+SETTINGS_MARKERS_TIME_MODE:Marker time display
+SETTINGS_MARKERS_TIME_MODE_RELATIVE:Relative (vs PB)
+SETTINGS_MARKERS_TIME_MODE_ABSOLUTE:Absolute (segment time)
+
+# ===== Markers panel (R10.5) =====
+MARKER_SOURCE_MAIN_DREAMS:Main Dreams
+MARKER_SOURCE_EXTRA_DREAMS:Extra Dreams
+MARKER_SOURCE_WORKSHOP:Workshop
+MARKER_LEVEL_META_PENDING:Level metadata is not loaded yet. Enter the main menu's level select once, then press Refresh.
+MARKER_LEVEL_UNAVAILABLE:Metadata unavailable
+MARKER_BACK:Back
+MARKER_NEW:New marker
+MARKER_DELETE:Delete
+MARKER_DELETE_CONFIRM:Confirm delete?
+MARKER_DELETE_CANCEL:Cancel
+MARKER_ENABLED:Enabled
+MARKER_NAME:Name
+MARKER_TYPE:Type
+MARKER_TYPE_RANGE:Range trigger
+MARKER_TYPE_CHECKPOINT:Checkpoint trigger
+MARKER_TYPE_GRAB:Grab object
+MARKER_DEFAULT_NAME:Marker
+
+# ===== Range trigger editor (R10.5.3) =====
+MARKER_SET_TO_PLAYER_POS:Set to player position
+MARKER_POS_X:Center X
+MARKER_POS_Y:Center Y
+MARKER_POS_Z:Center Z
+MARKER_SIZE_X:Length X
+MARKER_SIZE_Y:Length Y
+MARKER_SIZE_Z:Length Z
+MARKER_GRAB_ANY:Require grabbing any object
+MARKER_JUMP:Require jumping
+MARKER_INVALID_RANGE:Range is invalid: all three side lengths must be > 0.
+
+# ===== Checkpoint trigger editor =====
+MARKER_CHECKPOINT_INDEX:Checkpoint number
+MARKER_TRIGGER_ON_LOAD:Trigger when loaded from the pause menu
+
+# ===== Grab-object trigger editor =====
+MARKER_SET_CURRENT_GRAB:Set to currently grabbed object
+MARKER_GRABBED_ID:Object
+MARKER_GRABBED_ID_EMPTY:(none)
+
+# ===== Marker capture errors (R10.5.4) =====
+MARKER_NEED_LEVEL:Not in a level; this action needs the local player.
+MARKER_GRAB_NONE:Not grabbing anything.
+MARKER_GRAB_MULTIPLE:Invalid: grabbing more than one object.
+MARKER_OBJECT_UNRESOLVED:The target object could not be found in this level.
+
+# ===== HUD / PB =====
+MARKER_HUD_EDIT_MODE:★ MARKER EDIT MODE ON ★
+MARKER_PB_LABEL:PB
+MARKER_NO_PB:--

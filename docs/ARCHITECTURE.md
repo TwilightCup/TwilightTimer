@@ -2,12 +2,12 @@
 
 > **中文版**: [zh/ARCHITECTURE.md](zh/ARCHITECTURE.md)
 
-This document explains how HSRTimer is structured and the design decisions
+This document explains how TwilightTimer is structured and the design decisions
 behind it. For the requirements, see [../REQUIREMENTS.md](../REQUIREMENTS.md).
 
 ## Guiding principle: poll, don't patch
 
-Almost every signal HSRTimer needs is a **public field or property** on the
+Almost every signal TwilightTimer needs is a **public field or property** on the
 game's classes:
 
 | Signal | Source |
@@ -17,7 +17,6 @@ game's classes:
 | Local/server/client | `NetGame.isLocal`, `NetGame.isServer`, `NetGame.isClient` |
 | Current checkpoint | `Game.currentCheckpointNumber` |
 | Cheats | `CheatCodes.climbCheat`, `CheatCodes.throwCheat` |
-| Game speed | `Time.timeScale` |
 | Jump | `Human.Localplayer.jump` |
 
 Because the timing/segment/reset/checkpoint/validity rules are defined on
@@ -27,8 +26,15 @@ cheaply, and resilient to game updates that rename or inline private methods.
 
 **Harmony is used only where no field exposes the event**: the two voiceline
 hooks (`NarrativeBlock.Play` and `SubtitleManager.PlayNarrative`, see
-[VOICELINE.md](VOICELINE.md)) and the pause-menu restart hook
-(`PauseMenu.RestartClick`, which fires the `restart_clears_forgivable` option).
+[VOICELINE.md](VOICELINE.md)), the pause-menu restart hook
+(`PauseMenu.RestartClick`, which fires the `restart_clears_forgivable` option),
+and the Jumpless jump-key suppression (`HumanControls.HandleInput`, R3.5.3).
+The last one is a deliberate exception: a pollable field *does* exist
+(`HumanControls.jump`), but enforcement is a *write* into a chain the game both
+writes and consumes within one physics frame (`NetPlayer.PreFixedUpdate` →
+`Human.FixedUpdate`); writing it from this plugin's own `FixedUpdate` would race
+on undefined script execution order. Polling covers *observation* — suppression
+of an input the game consumes same-frame must hook inside the chain.
 
 ## Module layout
 
@@ -40,33 +46,67 @@ Core/
   RunState.cs             single source of truth (time, segments, flags, caches)
   SegmentLogic.cs         pure Appendix-B truth table
   RetryAction.cs          one-key retry (R6)
+  RetryTargetResolver.cs  user-specified retry target resolution (R6.5)
+  LevelIdentity.cs        shared level id / English-name helpers (R8.2.3, R10.1.2)
 Validation/
   InvalidReason.cs        enum + severity map
   ValidityFlags.cs        unforgivable/forgivable flag sets
-  GenericValidators.cs    cheat / timeScale / drift detector
+  GenericValidators.cs    cheat-code detector
 Tags/
   ITagRule.cs             tag rule interface + ValidationContext
   TagRuleRegistry.cs      extension registry (R3.7)
   CheckpointRules.cs      R4 skip-exception + final-checkpoint tables
   VoicelineTracker.cs     scene scan + Easter detection
-  Rules/                  Checkpoint / NoCheckpoint / Jumpless / Voiceline
+  Rules/                  Checkpoint / NoCheckpoint / Jumpless / Voiceline / Glitchless / NoEC
 Patches/
   PatchModule.cs          Harmony.CreateAndPatchAll
   NarrativeBlockPatches.cs    postfix on NarrativeBlock.Play
   SubtitleManagerPatches.cs   postfix on SubtitleManager.PlayNarrative
-  PauseMenuPatches.cs         postfix on PauseMenu.RestartClick
+  PauseMenuPatches.cs         postfix on PauseMenu.RestartClick / LoadClick
+  HumanControlsPatches.cs     postfix on HumanControls.HandleInput (Jumpless enforcement)
 Hud/
   TimerHud.cs             IMGUI panel (R2)
-  GradientText.cs         color hex/alpha + gradient helper
-  TemplateVars.cs         {date}/{time}/{version}/{collection}/{category}
+  LeaderboardHud.cs       shared left-side fixed-top leaderboard HUD (subsegment R8.5 / markers R10.7)
+  SettingsPanel.cs        IMGUI settings panel + built-in tab pages
+  ISettingsPanelTab.cs    external settings-panel tab interface
+  ILocalizableSettingsPanelTab.cs  optional language-aware external tab interface
+  SettingsPanelTabRegistry.cs  external tab registry + language/save notifications
+  GradientText.cs         color hex/alpha + gradient helper + TimeFormatter
+  TemplateVars.cs         {date}/{time}/{version}/{collection}/{category}/{gametime}/{realtime}
 Config/
   ConfigService.cs        facade
   PersistenceService.cs   tolerant INI reader/writer
   SettingsModel.cs, EnabledTagsModel.cs, LayoutModel.cs
+Subsegment/
+  SubsegmentModels.cs      sample/meta/reference/plane data types
+  SubsegmentManager.cs      recorder + loader + comparator lifecycle
+  SubsegmentFileStore.cs   JSONL/meta file I/O
+Markers/
+  MarkerModels.cs          marker set / def / PB data types (R10.1/10.3)
+  MarkerStore.cs           marker JSON file I/O + category key (R10.1.1)
+  MarkerCatalog.cs         Main/Extra/Workshop level lists (R10.5.1)
+  MarkersManager.cs        trigger evaluation + feed + PB (R10.2/10.3/10.7)
+  MarkersPanel.cs          "Markers" settings tab pages/editors (R10.5)
+  MarkerOverlay.cs         edit-mode 3D cubes + labels (R10.6)
 Localization/
   LocalizationService.cs, LanguageFile.cs
-LcIntegration.cs          optional LevelCollections soft integration
+LcIntegration.cs          TwilightCore built-in LC integration (direct API, hard dependency)
+TwilightTimerApi.cs            public static debug/direct-consumption surface (Twilight Cup T1.6)
+Match/                    Twilight Cup match support (see TWILIGHT_CUP.md)
+  MatchMode.cs            match-mode state + user tag snapshot (T2)
+  RoundTracker.cs         round lifecycle, segment records, queries (T3/T4.5/T5)
+  TimerEvents.cs          outbound events, per-subscriber try/catch (T4)
+  MainThreadQueue.cs      main-thread marshaling for external callers (T1.4)
+  TwilightTimerProvider.cs ITimerProvider adapter, self-registers with TwilightCore (T1)
 ```
+
+> **Note on LevelIdentity**: `SubsegmentManager` delegates its IL/ML level-id
+> derivation to the shared `LevelIdentity` helpers so the on-disk layout never
+> drifts from the ids the markers module computes. Subsegment keeps its legacy
+> LocalWorkshop fallback (`W{levelNumber}`, `folderFallbackForLocalWorkshop:
+> false`) so pre-existing PB directories stay addressable; markers use the
+> folder-name fallback (`true`) so a marker created in the panel resolves to the
+> same level key while playing.
 
 ## The timing truth table (Appendix B)
 
@@ -78,22 +118,32 @@ Each physics frame (`FixedUpdate`), in order:
    - **Segment start (R1.2)**: `LoadingLevel/Inactive → PlayingLevel`, not in a lobby.
    - **Resume from pause (R1.3)**: `Paused → PlayingLevel` while timing was stopped.
 2. **Accumulate** — `GameTime += Time.fixedDeltaTime` when `PlayingLevel` and not in a lobby / not waiting on the server.
-3. **Menu supplement** — additionally `fixedDeltaTime` while `Inactive` or in a lobby, when `CountInMenu` is on.
-4. **Rules** — run each active category's tag rules' `OnTick`.
+3. **Rules** — run each active category's tag rules' `OnTick`.
 
-`Update` (per render frame) handles: cheat/timeScale checks, **resetting the
-drift window during any non-playing gap** (so a pause/menu interval can't
-poison the next window — `FixedUpdate` doesn't run while paused), the **pause
+`Update` (per render frame) handles: the cheat-code check, the **pause
 supplement** (`unscaledDeltaTime` while `Paused`, since `timeScale=0` halts
 `FixedUpdate`), and keybinds.
 
-`LoadingLevel` and the client-wait gap (`ClientWaitServerLoad`) **never** count,
-and no toggle restores them.
+Pause time is always counted; menu/lobby time is never counted. `LoadingLevel`
+and the client-wait gap (`ClientWaitServerLoad`) **never** count either.
+
+### Real Time clock (R1.10)
+
+Separate from `GameTime`, `RunState.RealTime` is a wall-clock timer that starts
+on the first playable segment of a run and accumulates with
+`Time.unscaledDeltaTime` in `TimerCore.Update` as long as
+`RunState.RealTimeActive` is true. Because it is not gated on `PlayingLevel`,
+it keeps advancing through `LoadingLevel` screens and pauses. It is stopped (and
+the value frozen) in `TimerCore.EndSegment` at the same moment a completed run
+is recorded (R1.6), and also stopped when the run exits to a menu or lobby
+(unless a retry is in progress) so it does not silently count idle time. Full resets and one-key retries zero it along with the live
+game timers. The HUD shows the row by default below Game Time through
+`show_real_time`; the clock remains active regardless of that display setting.
 
 ## Why retry unloads then re-launches the level
 
 R6.2 requires a **full async level reload**, including the empty transition
-scene (R6.2.1.3). HSRTimer drives it as a coroutine on the engine MonoBehaviour:
+scene (R6.2.1.3). TwilightTimer drives it as a coroutine on the engine MonoBehaviour:
 
 1. `Game.instance.UnloadLevel()` tears the running level down — `AfterUnload`
    sets `currentLevelNumber = -1`, `state = Inactive`, clears `currentLevel`
@@ -118,12 +168,11 @@ checkpoint respawn — exactly the pause-menu "Restart" button behavior, which i
 what R6 forbids. This is intentionally **not** `Game.RestartLevel(true)`
 (checkpoint respawn, no scene reload) and **not** `Game.ReloadBundle()`
 (Workshop-only: dereferences `workshopLevel.dataPath` and crashes on BuiltIn
-levels after setting `timeScale = 0`, freezing the game in the "Empty" scene and
-tripping the R5.1.2 timeScale detector).
+levels after setting `timeScale = 0`, freezing the game in the "Empty" scene).
 
-This is a level-level restart. A retry re-attempts the current level, so both
-live timers (total game time and the current segment) reset to zero and the
-level is timed from scratch. It is independent of the R1.7 run reset in the
+This is a level-level restart. A retry re-attempts the current level, so the
+live timers (total game time, current segment, and Real Time) reset to zero and
+the level is timed from scratch. It is independent of the R1.7 run reset in the
 sense that it does **not** clear the run's records (completed
 segments, `LastRun`) or validity flags. The reload drives the level through
 `PlayingLevel → Inactive → LoadingLevel → PlayingLevel`; to keep that from
@@ -135,9 +184,8 @@ looking like a run exit, `RetryAction` zeroes `GameTime`/`SegmentStart` and sets
   `App.state == Menu`, which a genuine run exit reaches via
   `PauseLeave → EnterMenu` but a retry never does). So retrying does not clear
   the run even with `AutoReset` on.
-- `SegmentLogic.ShouldAccumulateMenu` returns false while `Retrying`, so the
-  time spent in `Inactive` during the reload is never counted (even with
-  `CountInMenu` on).
+- Menu/lobby time is never counted (the fixed-step clock only runs while
+  `PlayingLevel`), so the `Inactive` dwell during the reload never adds time.
 - `EndSegment` / `StartSegment` skip the LC
   full-run capture, the `LastRun` snapshot, **and the tag `OnLevelExit`
   callbacks** while `Retrying` — the level was abandoned mid-attempt, not
@@ -158,7 +206,7 @@ This is `R6.3`.
 
 Restarting a collection re-times the entire run from level 1, so it must take precedence over
 the single-level reload. Delegating to `lc restart` (rather than reflecting on LC internals) means
-HSRTimer reuses LC's scene-reload forcing (`ResetCurrentLevelIfSame`), level validation, and
+TwilightTimer reuses LC's scene-reload forcing (`ResetCurrentLevelIfSame`), level validation, and
 launching — and it works for both config collections and transient (`lc random`) runs. `Shell.RawInvoke`
 is the same code path the console uses, so the dispatched command behaves exactly like typing
 `lc restart`.
@@ -171,9 +219,9 @@ non-forgivable flags (R6.2.2 independence from R1.7 applies here too). Implement
 
 Two guard cases, both surfaced as `NOTIFY_RETRY_BLOCKED_STATE` without mutating any timer state:
 LC refuses a new `lc restart` while one of its delayed commands (`lc restart/skip/random <seconds>`)
-is counting down (`IsDelayedCommandPending`), so HSRTimer refuses too; and if `RestartCollection`
+is counting down (`IsDelayedCommandPending`), so TwilightTimer refuses too; and if `RestartCollection`
 itself returns false (LC absent at call time, run ended), the speculatively-zeroed timers are
-restored and HSRTimer falls back to the single-level reload.
+restored and TwilightTimer falls back to the single-level reload.
 
 ### R6.4 — the campaign "entered from menu" retry target
 
@@ -203,14 +251,46 @@ just started.
 **Persistence.** `CampaignRetryLevel` survives campaign advances (they don't
 re-trip the menu edge), full-run resets, and retries themselves — it means "the
 level the player last entered from the menu", which stays meaningful until the
-next menu entry overwrites it (a new run at a different level). `MenuEntryPending`
-is cleared by `RunState.Reset`.
+next menu entry overwrites it (a new run at a different level). A fresh menu
+entry that starts an EditorPick/Workshop/collection level clears it back to -1,
+so retry falls back to the current level instead of a stale built-in target.
+`MenuEntryPending` is cleared by `RunState.Reset`.
 
 **Retry behavior.** In `RetryAction.TryExecute`, when `CampaignRetryLevel >= 0`
 the reload re-launches that level as `BuiltIn` (`NOTIFY_CAMPAIGN_RESTARTED`);
 otherwise — EditorPick, Workshop, or any run not tagged as menu-entered — the
-current-level reload runs unchanged (`NOTIFY_LEVEL_RESTARTED`). Timing semantics
+current-level reload runs unchanged (`NOTIFY_LEVEL_RESTARTED`). Workshop
+current-level reloads use the full `Game.workshopLevel.workshopId` with
+`App.LaunchSinglePlayer` so the complete Steam Workshop id is preserved even
+though `Game.currentLevelNumber` stores only a truncated `int`. Because a large
+Workshop id can truncate to a negative `currentLevelNumber`, the active-level
+guard also treats a set `Game.workshopLevel` as an active level; otherwise the
+retry key would stop responding after the first Workshop retry. Timing semantics
 are identical either way (see R6.2.2 above).
+
+### R6.5 — user-specified retry target
+
+The settings panel's General page has an optional **"Specify retry level"**
+override. When enabled, the one-key retry ignores the R6.4/current-level target
+selection and re-launches the level named in the associated text field. The
+input is either the game's English localized level name for a BuiltIn/EditorPick
+level (case-insensitive) or a loaded Steam Workshop numeric id; a numeric value
+is always treated as a Workshop id. Resolution uses `WorkshopRepository` plus
+the game's English localization table, so it works even when the current game
+language is not English.
+
+When no level is active (for example the main menu), a valid override lets the
+retry key directly launch the specified level; the normal R6.1.2c "a level must
+be active" guard is skipped only in this override case. This makes the feature
+usable as a quick level launcher without first entering a level.
+
+If the configured value cannot be resolved, `RetryAction` does not start a
+reload, does not touch timers/flags, and sets a transient HUD flag that renders
+the same red banner style used for invalid runs. The hint stays until a retry is
+pressed with a resolvable value or the option is switched off. During an LC
+collection run, R6.3's `lc restart` precedence remains unchanged — the override
+is validated (and can show an invalid hint), but an active collection restart
+still restarts the whole collection rather than a single specified level.
 
 ## Why segment end is recorded before the auto-reset clear
 
@@ -248,17 +328,25 @@ built-in level's `StartNextLevel` reload) is inherently a completion, and there
 `LastRun` (the "last run" total) is recorded at the instant a run is *completed*,
 and it must distinguish three unrelated endings that the game state alone can't
 tell apart. The rule runs in `EndSegment` when `completed` is true, using
-segment-start snapshots / per-tick latches (because by then the game/LC state has
-already moved on to whatever follows):
+segment-start snapshots (because by then the game/LC state has already moved on
+to whatever follows):
 
 - **Campaign → Credits**: a BuiltIn level whose number is `levelCount - 1` (the
   last playable level; the game then loads Credits at index `levelCount`).
 - **Standalone EditorPick**: an EditorPick level passed *outside* an LC
-  collection run (`InCollectionRunSegment` latch false).
+  collection run (`InCollectionRunSegment` snapshot false).
 - **Collection completion**: the last level of an LC collection run
-  (`OnCollectionLastLevel` latch). This one needs latching because LC ends the
-  run synchronously inside `Game.Fall`, before the engine's FixedUpdate observes
-  the state flip.
+  (`OnCollectionLastLevel` snapshot). Both LC flags are snapshotted at segment
+  start, not latched per tick: LC advances `CurrentLevelIndex` synchronously
+  inside `Game.Fall`, so when the second-to-last level is passed the index is
+  already "last level" during the window before the segment-end edge — a
+  per-tick latch would observe that and wrongly fire `RunCompleted` one level
+  early (premature `project_complete` in Twilight Cup MULTI rounds). A
+  segment-start snapshot keeps the judgment segment-scoped: only a segment that
+  *began* as the last level counts. This also covers the true completion edge —
+  LC ends the run synchronously inside `Game.Fall` (before the engine's
+  FixedUpdate observes the state flip), but the index does not change there, so
+  the start snapshot already captured "last level".
 
 (Workshop level passes alone are not a "run completion" — they don't end a run
 in the timer's sense.) A prior heuristic that recorded `LastRun` at any segment
@@ -269,7 +357,13 @@ only on these genuine completions.
 `LastRun` renders in its own column immediately to the right of the timer stack
 (not inside it, anchored at the main block's widest line), and only while idle
 (`!InSegment && GameTime == 0`) — once a new run starts timing it hides until
-the next completion. The one exception is the campaign epilogue: the game loads
+the next completion. That same right-hand column can also show the current level's **Wake Up Time**
+as its second row (gated by `show_wake_up_time`), so the per-level value stays
+visible during a run even when `LastRun` is hidden. By default the measurement
+restarts on player respawns, pause-menu checkpoint loads, and pause-menu level
+restarts; the `only_record_first_wake_up_time` setting restores the original
+level-start-to-first-wake-up behavior. It is cleared when the level ends or is
+exited. The one exception is the campaign epilogue: the game loads
 Credits (BuiltIn index == `levelCount`) as an ordinary level right after the
 final playable level is passed, and that segment is flagged
 `InEpilogueSegment` — it belongs to the run that just finished, so the column
@@ -279,18 +373,24 @@ a level inside a collection run does NOT count as the epilogue (the run is still
 active — appearing in Credits mid-collection is just an ordinary level), so
 `InEpilogueSegment` also requires "not currently in a collection run".
 
-## Why auto-reset preserves the "last" snapshots
+## Why auto-reset and menu entry clear the last-segment snapshots
 
-`LastSegment`, `TotalAtLastSegment`, and `LastRun` are HUD reference values
-("how the previous segment/run compared"). They update only when a new value is
-recorded (a segment end records `LastSegment`/`TotalAtLastSegment`; a new run
-begun from a reset or a completed last level records `LastRun`) — so an
-**auto-reset (R1.7) must not clear them**, even though it clears the live timers.
-`RunState.Reset(bool keepLastValues)` expresses this: the auto-reset path
-(`HandleTransitions` → `DoFullReset(keepLastValues: true)`) keeps the three
-snapshots; the **manual reset key** (`DoFullReset(keepLastValues: false)`) clears
-them, since pressing reset means "I want a fresh comparison baseline." (Retry
-doesn't touch `Reset` at all — it goes through the `Retrying` flag.)
+`LastSegment` and `TotalAtLastSegment` are HUD reference values for the most
+recent completed segment, while `LastRun` is the last completed run's total.
+**Auto-reset (R1.7) clears the live timers and the two last-segment snapshots**,
+so leaving to the menu presents a fresh segment baseline, while keeping
+`LastRun` as the previous completed-run reference (R1.7.4). The manual reset key
+clears all three snapshots (R1.7.1).
+
+`RunState.Reset(bool keepLastValues, bool keepLastRun)` keeps these concerns
+separate. The auto-reset and menu-entry paths use
+`DoFullReset(keepLastValues: false, keepLastRun: true)`; the manual reset key
+uses `DoFullReset(keepLastValues: false, keepLastRun: false)`.
+
+A `Menu → LoadLevel` edge also calls `DoFullReset` before the new segment begins
+(R1.7.5), so a run entered from the menu always starts at zero regardless of the
+AutoReset option. A retry does not call `Reset`; it zeroes the live timers
+through the `Retrying` flag while preserving the run's records.
 
 ## Config check & repair
 
@@ -320,8 +420,71 @@ method plus one entry in the `ConfigRepair.Rules` array.
 ## Building
 
 ```bash
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
 `Directory.Build.props` points at the default Steam install's managed DLLs and
 BepInEx core. Override `GAME_MANAGED` / `BEPINEX_CORE` for other platforms.
+
+
+## Twilight Cup match integration (TwilightTimer branch)
+
+The `TwilightTimer` branch hard-depends on TwilightCore (compile-time
+reference to its built DLL + BepInDependency) and serves as its timing
+engine. Match capabilities live in `Match/` and `TwilightTimerApi` and activate
+only inside a match session; local play is unaffected. See
+[TWILIGHT_CUP.md](TWILIGHT_CUP.md) for the full behavior, constraints, and
+the acceptance-scenario mapping. The integration contract with TwilightCore
+(ITimerProvider) is dependency-inverted: TwilightCore owns the interface,
+this plugin implements and self-registers it.
+
+`Directory.Build.props` imports an optional, gitignored
+`Directory.Build.user.props` that holds machine-local reference paths for the
+managed DLLs and BepInEx core. Override `GAME_MANAGED` / `BEPINEX_CORE` for
+other machines.
+
+## The Markers module (R10)
+
+Markers follow the same **poll, don't patch** principle as everything else:
+
+- **Triggers are polling.** `MarkersManager.OnPhysicsTick` runs inside
+  `TimerCore.FixedUpdate` (right after the subsegment tick) and reads public
+  fields only: `Human.Localplayer.transform.position`, `Human.jump`,
+  `Human.state`, `Human.Localplayer.GetComponent<GrabManager>().grabbedObjects`,
+  `Game.currentCheckpointNumber`, and `RunState.GameTime`/`SegmentStart`.
+- **The one non-pollable event** is the pause-menu checkpoint load
+  (`PauseMenu.LoadClick` → `Game.RestartCheckpoint`), which runs while
+  `FixedUpdate` is halted. It is delivered through the *existing*
+  `PauseMenuLoadPatch` postfix (no new Harmony class); the pause-menu level
+  restart (`PauseMenu.RestartClick`) similarly notifies the manager to clear the
+  level's marker records and feed (R10.1.6).
+- **PB timing matches R8**: written at level end in `TimerCore.EndSegment`
+  before `State.EndSegment` (so the run's reset does not destroy the segment
+  start), gated on passed + not-retrying + valid. The tag `OnLevelExit`
+  completion checks (final checkpoint / voiceline) run **before** the
+  subsegment and marker PB writes, so a run that is only discovered invalid at
+  level exit is never recorded as a PB.
+- **The leaderboard is shared.** `LeaderboardHud` (renamed from `SubsegmentHud`)
+  renders either the subsegment references or the marker feed based on
+  `LayoutModel.LeaderboardMode`; the mode-cycle key moved from
+  `SubsegmentManager` to the HUD, so the same key and appearance settings work
+  for both modes. It cycles hidden → Subsegment → Markers → hidden. Its top
+  edge is fixed at the screen center (plus `layout.ini [leaderboard] offset_y`),
+  so content extends downward instead of re-centering as the number of rows
+  changes. The marker feed is newest-first, format `{name}: {time}` (absolute
+  segment time or signed diff vs the marker's PB), with the faster/slower/tie
+  colors applied in both time modes (R10.7).
+- **Object identity has no GUID in the game.** A captured grab-object reference
+  stores the serialized `NetIdentity.sceneId` (unique per scene object within a
+  level build) when present, else the hierarchy path from the scene root, plus
+  name and world position. Resolution order: sceneId scan → path walk → name +
+  position within 5 m (last resort, logged). Unresolvable targets are skipped
+  for the attempt with a per-level warning (R10.6.4).
+- **Visualization is side-effect free.** `MarkerOverlay` renders range cubes and
+  grab-object highlights with `Graphics.DrawMesh` + a transparent unlit material
+  (no colliders, no game-object/material mutation, so netcode is unaffected); if
+  no shader is found it degrades once to an IMGUI wireframe projection. Labels
+  are IMGUI labels projected through the currently active camera: the local
+  player's camera when it is enabled, otherwise `Camera.main` (or any enabled
+  camera), so free-roam mode shows labels at the free camera's true projected
+  positions instead of the character-relative player camera.

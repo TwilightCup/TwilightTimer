@@ -2,11 +2,11 @@
 
 > **English (source of truth)**: [../ARCHITECTURE.md](../ARCHITECTURE.md)
 
-本文档说明 HSRTimer 的结构与设计决策。需求规格见 [../../REQUIREMENTS.md](../../REQUIREMENTS.md)。
+本文档说明 TwilightTimer 的结构与设计决策。需求规格见 [../../REQUIREMENTS.md](../../REQUIREMENTS.md)。
 
 ## 核心原则:轮询,而非 patch
 
-HSRTimer 所需的几乎所有信号都是游戏类的**公共字段或属性**:
+TwilightTimer 所需的几乎所有信号都是游戏类的**公共字段或属性**:
 
 | 信号 | 来源 |
 |------|------|
@@ -15,12 +15,11 @@ HSRTimer 所需的几乎所有信号都是游戏类的**公共字段或属性**:
 | 本地/主机/客户端 | `NetGame.isLocal`、`NetGame.isServer`、`NetGame.isClient` |
 | 当前检查点 | `Game.currentCheckpointNumber` |
 | 作弊 | `CheatCodes.climbCheat`、`CheatCodes.throwCheat` |
-| 游戏速度 | `Time.timeScale` |
 | 跳跃 | `Human.Localplayer.jump` |
 
 由于计时 / 分段 / 重置 / 检查点 / 有效性的规则都定义在这些字段的*转换*上,单个轮询循环(`TimerCore.FixedUpdate`)通过比较当前帧与缓存上一帧即可算出一切 —— 既廉价,又对游戏更新中重命名或内联私有方法具有鲁棒性。
 
-**Harmony 仅用于没有字段能直接暴露事件的地方**:两个旁白 hook(`NarrativeBlock.Play` 与 `SubtitleManager.PlayNarrative`,见 [VOICELINE.md](VOICELINE.md)),以及暂停菜单重启 hook(`PauseMenu.RestartClick`,触发 `restart_clears_forgivable` 选项)。
+**Harmony 仅用于没有字段能直接暴露事件的地方**:两个旁白 hook(`NarrativeBlock.Play` 与 `SubtitleManager.PlayNarrative`,见 [VOICELINE.md](VOICELINE.md))、暂停菜单重启 hook(`PauseMenu.RestartClick`,触发 `restart_clears_forgivable` 选项),以及禁跳跳跃键抑制 hook(`HumanControls.HandleInput`,R3.5.3)。最后一个是有意为之的例外:虽然存在可轮询的字段(`HumanControls.jump`),但强制执行是对游戏**同一物理帧内写入并消费**的链路(`NetPlayer.PreFixedUpdate` → `Human.FixedUpdate`)的*写入*;从插件自身的 `FixedUpdate` 写该字段会陷入未定义的脚本执行顺序竞态。轮询覆盖的是*观察*——抑制一个游戏同帧消费的输入,必须挂钩进链路内部。
 
 ## 模块布局
 
@@ -32,33 +31,61 @@ Core/
   RunState.cs             唯一权威状态(时间、分段、标记、缓存)
   SegmentLogic.cs         纯函数的附录 B 真值表
   RetryAction.cs          一键重试(R6)
+  RetryTargetResolver.cs  用户指定的重试目标解析(R6.5)
+  LevelIdentity.cs        共享的关卡 id / 英文名助手(R8.2.3, R10.1.2)
 Validation/
   InvalidReason.cs        枚举 + 严重度映射
   ValidityFlags.cs        不可原谅 / 可原谅标记集合
-  GenericValidators.cs    作弊 / timeScale / 漂移检测
+  GenericValidators.cs    作弊码检测
 Tags/
   ITagRule.cs             标签规则接口 + ValidationContext
   TagRuleRegistry.cs      扩展注册表(R3.7)
   CheckpointRules.cs      R4 跳关例外 + 终点检查点表
   VoicelineTracker.cs     场景扫描 + Easter 检测
-  Rules/                  Checkpoint / NoCheckpoint / Jumpless / Voiceline
+  Rules/                  Checkpoint / NoCheckpoint / Jumpless / Voiceline / Glitchless / NoEC
 Patches/
   PatchModule.cs          Harmony.CreateAndPatchAll
   NarrativeBlockPatches.cs    NarrativeBlock.Play 后缀
   SubtitleManagerPatches.cs   SubtitleManager.PlayNarrative 后缀
-  PauseMenuPatches.cs         PauseMenu.RestartClick 后缀
+  PauseMenuPatches.cs         PauseMenu.RestartClick / LoadClick 后缀
+  HumanControlsPatches.cs     HumanControls.HandleInput 后缀(禁跳强制)
 Hud/
   TimerHud.cs             IMGUI 面板(R2)
-  GradientText.cs         颜色十六进制/透明度 + 渐变助手
-  TemplateVars.cs         {date}/{time}/{version}/{collection}/{category}
+  LeaderboardHud.cs       共享的左侧固定顶部排行榜 HUD(subsegment R8.5 / 标记 R10.7)
+  SettingsPanel.cs        IMGUI 设置面板 + 内置标签页
+  ISettingsPanelTab.cs   外部设置面板标签页接口
+  ILocalizableSettingsPanelTab.cs  可选的语言感知外部标签页接口
+  SettingsPanelTabRegistry.cs  外部标签注册表 + 语言/保存通知
+  GradientText.cs         颜色十六进制/透明度 + 渐变助手 + TimeFormatter
+  TemplateVars.cs         {date}/{time}/{version}/{collection}/{category}/{gametime}/{realtime}
 Config/
   ConfigService.cs        门面
   PersistenceService.cs   容错 INI 读写
   SettingsModel.cs, EnabledTagsModel.cs, LayoutModel.cs
+Subsegment/
+  SubsegmentModels.cs     采样/元数据/参考项/检测平面数据类型
+  SubsegmentManager.cs     记录器 + 加载器 + 比较器生命周期
+  SubsegmentFileStore.cs   JSONL/meta 文件读写
+Markers/
+  MarkerModels.cs          标记集/定义/PB 数据类型(R10.1/10.3)
+  MarkerStore.cs           标记 JSON 文件读写 + 类别键(R10.1.1)
+  MarkerCatalog.cs         主梦境/额外梦境/工坊关卡列表(R10.5.1)
+  MarkersManager.cs        触发判定 + feed + PB(R10.2/10.3/10.7)
+  MarkersPanel.cs         "标记"设置标签页的页面/编辑器(R10.5)
+  MarkerOverlay.cs         编辑模式的 3D 立方体 + 标签(R10.6)
 Localization/
   LocalizationService.cs, LanguageFile.cs
-LcIntegration.cs          可选的 LevelCollections 软集成
+LcIntegration.cs          TwilightCore 内置 LC 集成（直连 API，硬依赖）
+TwilightTimerApi.cs            公共静态调试/直连面（黄昏杯 T1.6）
+Match/                    黄昏杯比赛支持（见 TWILIGHT_CUP.md）
+  MatchMode.cs            比赛模式状态 + 用户标签快照（T2）
+  RoundTracker.cs         回合生命周期、分段记录、查询（T3/T4.5/T5）
+  TimerEvents.cs          对外事件，逐订阅者 try/catch（T4）
+  MainThreadQueue.cs      外部调用的主线程编组（T1.4）
+  TwilightTimerProvider.cs ITimerProvider 适配器，向 TwilightCore 自注册（T1）
 ```
+
+> **关于 LevelIdentity**:`SubsegmentManager` 将 IL/ML 关卡 id 推导委托给共享的 `LevelIdentity` 助手,以保证磁盘目录布局与标记模块计算的 id 永不漂移。subsegment 保留其旧的 LocalWorkshop 回退(`W{levelNumber}`,`folderFallbackForLocalWorkshop: false`),以维持既有 PB 目录可寻址;标记模块使用文件夹名回退(`true`),使面板中创建的标记在游玩时解析到同一关卡 key。
 
 ## 计时真值表(附录 B)
 
@@ -70,28 +97,31 @@ LcIntegration.cs          可选的 LevelCollections 软集成
    - **分段起点(R1.2)**:`LoadingLevel/Inactive → PlayingLevel`,且不在大厅。
    - **暂停恢复(R1.3)**:`Paused → PlayingLevel` 且此前计时已停止。
 2. **累计** —— 当 `PlayingLevel` 且不在大厅 / 不在等待主机时 `GameTime += Time.fixedDeltaTime`。
-3. **菜单补回** —— 当 `CountInMenu` 开启时,在 `Inactive` 或大厅期间额外加 `fixedDeltaTime`。
-4. **规则** —— 运行当前类别各标签规则的 `OnTick`。
+3. **规则** —— 运行当前类别各标签规则的 `OnTick`。
 
-`Update`(每渲染帧)负责:作弊 / timeScale 检查、**在任意非游玩间隙重置漂移窗口**(避免暂停 / 菜单间隔污染下一个窗口 —— 暂停时 `FixedUpdate` 不运行)、**暂停补回**(因 `timeScale=0` 会使 `FixedUpdate` 停止,故在 `Paused` 期间加 `unscaledDeltaTime`),以及按键处理。
+`Update`(每渲染帧)负责:作弊码检查、**暂停补回**(因 `timeScale=0` 会使 `FixedUpdate` 停止,故在 `Paused` 期间加 `unscaledDeltaTime`),以及按键处理。
 
-关卡加载屏(`LoadingLevel`)与客户端等待主机间隙(`ClientWaitServerLoad`)**始终不计入**,且无开关可补回。
+暂停期间始终计时,菜单 / 大厅期间始终不计时。关卡加载屏(`LoadingLevel`)与客户端等待主机间隙(`ClientWaitServerLoad`)**始终不计入**。
+
+### 现实时间计时器(R1.10)
+
+与 `GameTime` 分开,`RunState.RealTime` 是墙钟计时器:它在整个运行的第一个可玩分段开始时启动,只要 `RunState.RealTimeActive` 为真,就在 `TimerCore.Update` 中用 `Time.unscaledDeltaTime` 累计。由于它不受 `PlayingLevel` 门槛限制,因此能穿过 `LoadingLevel` 加载屏与暂停继续前进。它在 `TimerCore.EndSegment` 记录整局完成(R1.6)的同一时刻停表并定格;当本局退出到菜单/大厅(重试除外)时也会停止,避免在空闲界面里暗中累计。整局重置与一键重试会把它与活动游戏计时器一并清零。HUD 通过 `show_real_time` 默认在游戏总时间下方显示该行,但无论是否显示,时钟都保持后台活跃。
 
 ## 为什么重试先卸载再重新启动关卡
 
-R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。HSRTimer 以引擎 MonoBehaviour 上的协程驱动:
+R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。TwilightTimer 以引擎 MonoBehaviour 上的协程驱动:
 
 1. `Game.instance.UnloadLevel()` 拆毁当前关卡 —— `AfterUnload` 把 `currentLevelNumber` 置为 `-1`、`state` 置为 `Inactive`,清空 `currentLevel` 与 `workshopLevel`。
 2. `SceneManager.LoadScene("Empty")` 加载空的过渡场景。
 3. **停留** —— 在空场景内停留至距按键已过 `retry_min_dwell` 秒(默认 0.5),用 `Time.unscaledTime` 计量。这让过快的重载得以喘息;`0` 表示不强制停留。空场景期间的时间绝不计入(`Retrying` 标志抑制累计)。
 4. `App.instance.LaunchSinglePlayer(level, type, 0, 0)` 重新启动**重试目标关卡**(见下文 R6.4 —— 从菜单进入的战役运行中,该目标是本次运行的起点关卡,而非当前关卡)。其 `LoadLevel` 协程**仅当 `currentLevelNumber != levelNumber` 时**才重载场景 —— 因此第 1 步的卸载才是第 4 步真正重载的关键。协程依次执行 `SignalManager.BeginReset` → 重载场景 → `AfterLoad`(`state = PlayingLevel`、`RespawnAllPlayers`、`Level.Reset(0, 0)`)。全程不显示菜单(App 状态机即 R6.2.1.4 所述的隐藏流程跳板)。对 BuiltIn / EditorPick / Workshop 关卡通用。
 
-省掉第 1 步,重新启动当前关卡会悄悄退化成检查点重生 —— 正是暂停菜单"Restart"按钮的行为,而这是 R6 明令禁止的。这里**不**用 `Game.RestartLevel(true)`(检查点重生、不重载场景),也**不**用 `Game.ReloadBundle()`(仅 Workshop 可用:它解引用 `workshopLevel.dataPath`,在内置关卡上抛异常,且在设置 `timeScale = 0` 之后崩溃,游戏卡在 "Empty" 场景、画面冻结,并触发 R5.1.2 的 timeScale 检测)。
+省掉第 1 步,重新启动当前关卡会悄悄退化成检查点重生 —— 正是暂停菜单"Restart"按钮的行为,而这是 R6 明令禁止的。这里**不**用 `Game.RestartLevel(true)`(检查点重生、不重载场景),也**不**用 `Game.ReloadBundle()`(仅 Workshop 可用:它解引用 `workshopLevel.dataPath`,在内置关卡上抛异常,且在设置 `timeScale = 0` 之后崩溃,游戏卡在 "Empty" 场景、画面冻结)。
 
-这是关卡级重启。重试即重新挑战当前关卡,因此两个实时计时器(游戏总时间与当前分段)都清零、关卡从头计时。它与 R1.7 整局重置相互独立,体现在它**不**清零本局的记录(已完成分段、`LastRun`)与无效标记。重载过程会让关卡经历 `PlayingLevel → Inactive → LoadingLevel → PlayingLevel`;为避免这被误判为整局退出,`RetryAction` 将 `GameTime`/`SegmentStart` 清零并置位 `RunState.Retrying`,引擎在重载期间据此处理:
+这是关卡级重启。重试即重新挑战当前关卡,因此活动计时器(游戏总时间、当前分段、现实时间)都清零、关卡从头计时。它与 R1.7 整局重置相互独立,体现在它**不**清零本局的记录(已完成分段、`LastRun`)与无效标记。重载过程会让关卡经历 `PlayingLevel → Inactive → LoadingLevel → PlayingLevel`;为避免这被误判为整局退出,`RetryAction` 将 `GameTime`/`SegmentStart` 清零并置位 `RunState.Retrying`,引擎在重载期间据此处理:
 
 - `SegmentLogic.IsAutoReset` 在 `Retrying` 期间抑制其 `PlayingLevel/Paused → Inactive` 分支(R1.7.3 分支还额外要求 `App.state == Menu` —— 真正的整局退出经 `PauseLeave → EnterMenu` 会到 Menu,而重试始终停在 LoadLevel)。因此即便 `AutoReset` 开启,重试也不会清零整局。
-- `SegmentLogic.ShouldAccumulateMenu` 在 `Retrying` 期间返回 false,重载时停留在 `Inactive` 的时间绝不计入(即便 `CountInMenu` 开启)。
+- 菜单 / 大厅时间始终不计入(固定步进时钟只在 `PlayingLevel` 运行),因此重载时停留在 `Inactive` 的时间不会增加计时。
 - `EndSegment` / `StartSegment` 在 `Retrying` 期间跳过 LC 整局成绩捕获、`LastRun` 快照**以及 tag 规则的 `OnLevelExit` 回调** —— 关卡是中途放弃、并非完成。`OnLevelExit` 执行 R4.2 最终检查点校验与语音线完成校验,若对放弃状态运行会误判 `INVALID_CHECKPOINT_FINAL` / `Voiceline`。当前关卡的分段仍会在重载关卡到达 `PlayingLevel` 时干净地重新开始。
 
 `Retrying` 在下一段分段开始时、以及整局重置时清零。
@@ -100,11 +130,11 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 
 当 Level Collections(LC)插件已加载**且**玩家正处于某次地图包运行中(`CollectionManager.IsInCollectionRun`)时,一键重试**不再**原地重载当前关卡 —— 而是通过游戏开发者控制台注册表派发 LC 自身的 `lc restart` 命令(`Shell.RawInvoke("lc restart")`),把整局地图包从第 1 关重启。即 `R6.3`。
 
-重启地图包意味着整局从第 1 关重新计时,因此它必须优先于单关重载。委托给 `lc restart`(而非反射 LC 内部)使 HSRTimer 复用 LC 的场景重载强制(`ResetCurrentLevelIfSame`)、关卡校验与启动逻辑 —— 且对配置地图包与临时地图包(`lc random`)均适用。`Shell.RawInvoke` 正是控制台所走的代码路径,因此派发的命令与手动键入 `lc restart` 行为完全一致。
+重启地图包意味着整局从第 1 关重新计时,因此它必须优先于单关重载。委托给 `lc restart`(而非反射 LC 内部)使 TwilightTimer 复用 LC 的场景重载强制(`ResetCurrentLevelIfSame`)、关卡校验与启动逻辑 —— 且对配置地图包与临时地图包(`lc random`)均适用。`Shell.RawInvoke` 正是控制台所走的代码路径,因此派发的命令与手动键入 `lc restart` 行为完全一致。
 
 计时器对此的处理与单关重试完全一致:先将 `GameTime`/`SegmentStart` 清零并置位 `RunState.Retrying`,这样被放弃关卡的分段终点不会被记为 `LastRun`,重载进入第 1 关也不会被误判为整局退出 —— 同时保留本局记录与(非可原谅)无效标记(R6.2.2 对整局重置 R1.7 的独立性在此同样适用)。实现位于 `RetryAction.TryExecute`(LC 分支)与 `LcIntegration.RestartCollection`。
 
-两个被拦截的情况都以 `NOTIFY_RETRY_BLOCKED_STATE` 提示,且不改动任何计时状态:当 LC 的某条延迟命令(`lc restart/skip/random <秒>`)正在倒计时时(`IsDelayedCommandPending`),LC 自身会拒绝新的 `lc restart`,HSRTimer 因此同样拒绝;若 `RestartCollection` 本身返回 false(调用时 LC 缺失、运行已结束),已被投机清零的计时器会被还原,HSRTimer 回退到单关重载。
+两个被拦截的情况都以 `NOTIFY_RETRY_BLOCKED_STATE` 提示,且不改动任何计时状态:当 LC 的某条延迟命令(`lc restart/skip/random <秒>`)正在倒计时时(`IsDelayedCommandPending`),LC 自身会拒绝新的 `lc restart`,TwilightTimer 因此同样拒绝;若 `RestartCollection` 本身返回 false(调用时 LC 缺失、运行已结束),已被投机清零的计时器会被还原,TwilightTimer 回退到单关重载。
 
 ## R6.4 —— 战役"从菜单进入"的重试目标
 
@@ -119,9 +149,17 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 
 因此 `SegmentLogic.IsMenuEntry(prevApp, nowApp)` 只会在真正的菜单选关时触发。`TimerCore.HandleTransitions` 把它锁存进 `RunState.MenuEntryPending`,随后的 `StartSegment` 将关卡号记入 `CampaignRetryLevel` —— 但仅当它是可玩的战役关卡(`BuiltIn`、`0 <= number < levelCount`、非 Credits 尾声、不在 LC 地图包运行中;地图包关卡的重试由 R6.3 负责)。之后 `MenuEntryPending` 即被清除;该边沿只描述刚刚开始的那一关。
 
-**持续性。** `CampaignRetryLevel` 在战役推进(不重新触发菜单边沿)、整局重置、乃至重试自身之间都保持不变 —— 它的含义是"玩家最近一次从菜单进入的关卡",在下一次菜单进入(换关卡开新局)改写它之前一直有效。`MenuEntryPending` 由 `RunState.Reset` 清除。
+**持续性。** `CampaignRetryLevel` 在战役推进(不重新触发菜单边沿)、整局重置、乃至重试自身之间都保持不变 —— 它的含义是"玩家最近一次从菜单进入的关卡",在下一次菜单进入(换关卡开新局)改写它之前一直有效。若下一次菜单进入开始的是 EditorPick / Workshop / 地图包关卡,则会把该记忆清除回 `-1`,让重试回退到当前关卡,而不会跳到之前的内置关。`MenuEntryPending` 由 `RunState.Reset` 清除。
 
-**重试行为。** 在 `RetryAction.TryExecute` 中,当 `CampaignRetryLevel >= 0` 时,重载以 `BuiltIn` 重新启动该关卡(提示 `NOTIFY_CAMPAIGN_RESTARTED`);否则 —— EditorPick、Workshop、或任何未被标记为菜单进入的运行 —— 原地重载当前关卡的行为与从前完全一致(提示 `NOTIFY_LEVEL_RESTARTED`)。两种情况的计时语义完全相同(见上文 R6.2.2)。
+**重试行为。** 在 `RetryAction.TryExecute` 中,当 `CampaignRetryLevel >= 0` 时,重载以 `BuiltIn` 重新启动该关卡(提示 `NOTIFY_CAMPAIGN_RESTARTED`);否则 —— EditorPick、Workshop、或任何未被标记为菜单进入的运行 —— 原地重载当前关卡的行为与从前完全一致(提示 `NOTIFY_LEVEL_RESTARTED`)。Workshop 当前关卡重载使用完整的 `Game.workshopLevel.workshopId` 调用 `App.LaunchSinglePlayer`,从而保留完整的 Steam 创意工坊 id(`Game.currentLevelNumber` 只保存截断后的 `int`)。由于较大的工坊 id 截断后可能让 `currentLevelNumber` 变成负数,活动关卡判断也会把已设置的 `Game.workshopLevel` 视为有活动关卡;否则第一次工坊重试后重试键就会失效。两种情况的计时语义完全相同(见上文 R6.2.2)。
+
+## R6.5 —— 用户指定的重试关卡
+
+设置面板“常规”页新增了可选的 **“指定重试关卡”** 开关。开启后,一键重试不再使用 R6.4 / 当前关卡的选择逻辑,而是重新启动对应文本框里填写的关卡。输入可以是官方 BuiltIn/EditorPick 关卡的**英文本地化名**(不区分大小写),也可以是**已加载的 Steam 创意工坊数字 id**;纯数字一律按创意工坊 id 处理。解析时会使用 `WorkshopRepository` 与游戏的英文本地化表,因此即使当前游戏语言不是英文也能工作。
+
+当没有活动关卡时(例如主菜单),只要指定目标有效,重试键就可以**直接启动**该指定关卡;原有的 R6.1.2c“必须有活动关卡”限制仅在指定重试关卡模式下跳过。这使该功能在不先进关卡的情况下也能当作快速选关入口使用。
+
+如果配置值无法解析,`RetryAction` 不会启动重载、不改动计时器与标记,并置位一个临时 HUD 标志,用与“成绩无效”相同的红色横幅样式提示。该提示会一直保留,直到用户填入可解析的值并再次按重试,或关闭该选项。在 LC 地图包运行中,R6.3 的 `lc restart` 优先规则保持不变 —— 重试目标仍会校验(无效时也可显示提示),但活动中的地图包重启仍会重启整个地图包,而不是单个指定关卡。
 
 ## 为什么分段终点在自动重置清零之前记录
 
@@ -133,21 +171,25 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 
 `EndSegment(completed: LevelPassed)` 只在 `completed` 为真时才记录 `LastSegment`/`TotalAtLastSegment`、tag 的 `OnLevelExit` 完成校验(R4.2、语音线)以及 LC 最后一关的 `LastRun` 捕获。中途退出(或重试,此时 `LevelPassed` 为假)不会改动上一段尝试的 `LastSegment`/`TotalAtLastSegment` —— 这正是想要的行为:"上一段"参照值反映的是上一关**打完**的成绩,而不是半途走出去的那一关。注意 `PlayingLevel → LoadingLevel`(内置关卡的 `StartNextLevel` 重载)本质上就是完成,且该处 `LevelPassed` 由更早的 `EnterPassZone` 置真。
 
-## 为什么自动重置保留"上一段/上一局"快照
+## 为什么自动重置与菜单进入会清零"上一段"快照
 
-`LastSegment`、`TotalAtLastSegment`、`LastRun` 是 HUD 的参照值("上一段/上一局成绩对比")。它们**仅在新值记录时更新**(分段终点记录 `LastSegment`/`TotalAtLastSegment`;整局完成时记录 `LastRun`)—— 因此**自动重置(R1.7)不清零这三个值**,即便它清零实时计时器。`RunState.Reset(bool keepLastValues)` 体现这一点:自动重置路径(`HandleTransitions` → `DoFullReset(keepLastValues: true)`)保留这三个快照;**手动重置键**(`DoFullReset(keepLastValues: false)`)则清零它们,因为按重置键意味着"我要一个全新的对比基线"。(重试完全不碰 `Reset` —— 它走 `Retrying` 标志。)
+`LastSegment` 与 `TotalAtLastSegment` 是最近完成分段的参照值,`LastRun` 是上一次完整整局的总时间。**自动重置(R1.7)会清零实时计时器与两个"上一段"快照**,使退出到菜单后呈现新的分段基线,同时保留 `LastRun` 作为上一次完整成绩的参照(R1.7.4)。手动重置键则清零全部三个快照(R1.7.1)。
+
+`RunState.Reset(bool keepLastValues, bool keepLastRun)` 区分这两个关注点。自动重置与菜单进入路径使用 `DoFullReset(keepLastValues: false, keepLastRun: true)`;手动重置键使用 `DoFullReset(keepLastValues: false, keepLastRun: false)`。
+
+`Menu → LoadLevel` 边沿也会在新分段开始前调用 `DoFullReset`(R1.7.5),因此无论是否开启"自动重置",从菜单进入的整局都从零开始。重试不调用 `Reset`;它通过 `Retrying` 标志清零实时计时器,同时保留整局记录。
 
 ## 什么算"整局完成"(LastRun)
 
-`LastRun`("上一局"总时间)在整局**完成**的那一刻记录,而它必须区分三种互不相关的收尾方式 —— 仅凭游戏状态无法区分。规则在 `EndSegment` 且 `completed` 为真时执行,使用分段开始时的快照 / 每帧锁存(因为此时游戏 / LC 的状态早已切换到后续内容):
+`LastRun`("上一局"总时间)在整局**完成**的那一刻记录,而它必须区分三种互不相关的收尾方式 —— 仅凭游戏状态无法区分。规则在 `EndSegment` 且 `completed` 为真时执行,使用分段开始时的快照(因为此时游戏 / LC 的状态早已切换到后续内容):
 
 - **官方战役进 Credits**:BuiltIn 关卡序号等于 `levelCount - 1`(最后一个可玩关卡;游戏随后加载索引 `levelCount` 的 Credits)。
-- **单独的 EditorPick**:在 LC 地图包运行**之外**完成的 EditorPick 关卡(`InCollectionRunSegment` 锁存为假)。
-- **地图包完成**:LC 地图包的最后一关(`OnCollectionLastLevel` 锁存)。这一条必须锁存,因为 LC 在 `Game.Fall` 内同步结束运行,早于引擎 FixedUpdate 观察到状态翻转。
+- **单独的 EditorPick**:在 LC 地图包运行**之外**完成的 EditorPick 关卡(`InCollectionRunSegment` 快照为假)。
+- **地图包完成**:LC 地图包的最后一关(`OnCollectionLastLevel` 快照)。两个 LC 标志都在**分段开始时快照**,而非每帧锁存:LC 在 `Game.Fall` 内同步推进 `CurrentLevelIndex`,倒数第二关被通过后的窗口期内索引已是"最后一关"——每帧锁存会观察到它,从而提前一关误触发 `RunCompleted`(Twilight Cup MULTI 回合的过早 `project_complete`)。分段开始时快照使判定限定在分段粒度:只有**以最后一关开始**的分段才算完成边沿。这也覆盖真正的完成边沿——LC 在 `Game.Fall` 内同步结束运行(早于引擎 FixedUpdate 观察到状态翻转),但该处索引不变,开始快照早已捕获"最后一关"。
 
 (单独的 Workshop 关卡通关不算"整局完成" —— 在计时器的语义里它不结束一局。)过去那个"任何分段开始时时钟还在跑就记录 LastRun"的启发式已移除:它会在战役中途的每个关卡边界误触发,而 EditorPick/Workshop 的收尾又永远捕不到;现在 `LastRun` 只在上述真正的完成时更新。
 
-`LastRun` 渲染在**紧挨计时列右侧新建的独立列**中(以主块最宽行为界),不与主计时同列,且仅空闲时(`!InSegment && GameTime == 0`)显示 —— 新局开始计时即隐藏,直到下次整局完成。唯一的例外是战役尾声:最后一个可玩关卡被通关后,游戏会把 Credits(BuiltIn 索引 == `levelCount`)当作普通关卡加载,该分段被标记为 `InEpilogueSegment` —— 它属于刚结束的那局,所以 Credits 期间列持续显示(且 Credits 自身不会记录任何东西:它没有通关区,其分段永远不会算作 `completed`)。**地图包运行中被列为关卡的 Credits 不算尾声**(运行仍在进行 —— collection 中途出现 Credits 只是一关普通关卡),因此 `InEpilogueSegment` 还要求"当前不在地图包运行中"。
+`LastRun` 渲染在**紧挨计时列右侧新建的独立列**中(以主块最宽行为界),不与主计时同列,且仅空闲时(`!InSegment && GameTime == 0`)显示 —— 新局开始计时即隐藏,直到下次整局完成。同一个右侧列在启用 `show_wake_up_time` 时还会把当前关卡的**起身时间**显示为第二行,因此即便 `LastRun` 隐藏,关内也能看到该值;默认在玩家重生、暂停菜单加载存档点或暂停菜单重新开始关卡时重新开始测量,`only_record_first_wake_up_time` 可恢复“本关开始后只记第一次起身”的原机制;关卡结束或退出时该值会被清除。唯一的例外是战役尾声:最后一个可玩关卡被通关后,游戏会把 Credits(BuiltIn 索引 == `levelCount`)当作普通关卡加载,该分段被标记为 `InEpilogueSegment` —— 它属于刚结束的那局,所以 Credits 期间列持续显示(且 Credits 自身不会记录任何东西:它没有通关区,其分段永远不会算作 `completed`)。**地图包运行中被列为关卡的 Credits 不算尾声**(运行仍在进行 —— collection 中途出现 Credits 只是一关普通关卡),因此 `InEpilogueSegment` 还要求"当前不在地图包运行中"。
 
 ## 配置检查与修复
 
@@ -160,7 +202,30 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 ## 构建
 
 ```bash
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
 `Directory.Build.props` 指向默认 Steam 安装目录下的托管 DLL 与 BepInEx core。其他平台用 `GAME_MANAGED` / `BEPINEX_CORE` 覆盖。
+
+
+## 黄昏杯比赛集成（TwilightTimer 分支）
+
+`TwilightTimer` 分支硬依赖 TwilightCore（编译期引用其构建产物 DLL +
+BepInDependency）并作为其计时引擎。比赛能力位于 `Match/` 与
+`TwilightTimerApi`，仅在比赛对局内生效；本地游玩不受影响。完整行为、约束与
+验收场景映射见 [TWILIGHT_CUP.md](TWILIGHT_CUP.md)。与 TwilightCore 的
+集成契约（ITimerProvider）为依赖倒置：TwilightCore 拥有接口，本插件实现
+并自注册。
+
+`Directory.Build.props` 会导入一个可选的、被 git 忽略的 `Directory.Build.user.props`，其中存放本机开发所用的托管 DLL 与 BepInEx core 引用路径。其他机器用 `GAME_MANAGED` / `BEPINEX_CORE` 覆盖。
+
+## 标记模块(R10)
+
+标记遵循与其它模块相同的 **"轮询,不补丁"** 原则:
+
+- **触发是轮询的。** `MarkersManager.OnPhysicsTick` 在 `TimerCore.FixedUpdate` 内运行(紧接 subsegment tick 之后),只读取公开字段:`Human.Localplayer.transform.position`、`Human.jump`、`Human.state`、`Human.Localplayer.GetComponent<GrabManager>().grabbedObjects`、`Game.currentCheckpointNumber`,以及 `RunState.GameTime` / `SegmentStart`。
+- **唯一不可轮询的事件**是暂停菜单的存档点加载(`PauseMenu.LoadClick` → `Game.RestartCheckpoint`),它在 `FixedUpdate` 停止期间发生。该事件通过*既有*的 `PauseMenuLoadPatch` 后缀投递(不新增 Harmony 类);暂停菜单的关卡重开(`PauseMenu.RestartClick`)同样通知管理器清空本关的标记记录与 feed(R10.1.6)。
+- **PB 时机与 R8 一致**:在 `TimerCore.EndSegment` 中、`State.EndSegment` *之前*写入(这样整局重置不会毁掉分段起点),门控条件为"通过 + 非重试 + 成绩有效"。tag 的 `OnLevelExit` 完成校验(最终检查点 / 旁白)会在 subsegment 与标记的 PB 写入**之前**执行,因此只有在关卡结束时才被发现无效的成绩也不会被记为 PB。
+- **排行榜是共享的。** `LeaderboardHud`(由 `SubsegmentHud` 改名)根据 `LayoutModel.LeaderboardMode` 渲染 subsegment 参考或标记 feed;模式循环键从 `SubsegmentManager` 移到了 HUD,因此两种模式共用同一个键与外观设置。该键按“关闭 → `Subsegment` → `Markers` → 关闭”循环。其顶部固定在屏幕垂直中心(加上 `layout.ini [leaderboard]` 的 `offset_y`),内容向下延伸而不再随行数变化重新居中。标记 feed 最新在上,格式为 `{名称}: {时间}`(绝对分段时间或与标记 PB 的带符号差值),两种时间模式下都应用领先 / 落后 / 持平颜色(R10.7)。
+- **物体身份在游戏里没有 GUID。** 捕获的抓取物体引用会在存在时记录序列化的 `NetIdentity.sceneId`(在关卡构建内对场景物体唯一),否则记录从场景根算起的层级路径,外加名称与世界坐标。解析顺序:sceneId 扫描 → 路径逐级匹配 → 名称 + 位置(5 m 容差,最后手段,记日志)。无法解析的目标在本次尝试中跳过,每关记一次警告(R10.6.4)。
+- **可视化无副作用。** `MarkerOverlay` 用 `Graphics.DrawMesh` + 透明 unlit 材质渲染范围立方体与抓取物体高亮(不创建碰撞体、不改游戏物体 / 材质,因此不影响联机);找不到 shader 时降级为一次 IMGUI 线框投影。标签是把标记中心经当前活动相机投影后绘制的 IMGUI 标签:本地玩家相机启用时优先使用它,否则使用 `Camera.main`(或任意启用中的相机),这样自由视角下名称会显示在自由相机投影后的真实位置,而不是角色相对相机的位置。

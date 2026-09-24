@@ -1,0 +1,1212 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using HumanAPI;
+using Multiplayer;
+using UnityEngine;
+
+namespace TwilightTimer
+{
+    /// <summary>
+    /// Runtime options for the R8 Subsegment module. Read from
+    /// <c>ConfigService.Settings</c> each frame, so settings panel changes apply
+    /// live without reloading the plugin.
+    /// </summary>
+    public struct SubsegmentOptions
+    {
+        public bool Enable;
+        public string PBPath;
+        public string LoadPath;
+        public string MultiProject;
+        public float PlaneRadius;
+        public float MinMove;
+        public float SampleInterval;
+        public float QuietSettleSeconds;
+        public float PlaneDebounceSeconds;
+        public float RespawnJumpMeters;
+        public int MaxSamplesPerLevel;
+        public int MaxLeaderboardEntries;
+        public bool DebugLogging;
+
+        /// <summary>
+        /// Display ids hidden from the leaderboard (denylist). Empty = show all
+        /// loaded sources (PB + load folders).
+        /// </summary>
+        public HashSet<string> DisabledLeaderboardSources;
+
+        /// <summary>Whether the given display id is allowed on the leaderboard.</summary>
+        public bool IsReferenceEnabled(string displayId)
+            => DisabledLeaderboardSources == null || string.IsNullOrEmpty(displayId)
+               || !DisabledLeaderboardSources.Contains(displayId);
+
+        public static SubsegmentOptions FromSettings(SettingsModel s)
+        {
+            return new SubsegmentOptions
+            {
+                Enable = s.SubsegmentEnable,
+                PBPath = SubsegmentFileStore.ResolvePath(string.IsNullOrEmpty(s.SubsegmentPBPath) ? "subsegment/pb" : s.SubsegmentPBPath),
+                LoadPath = SubsegmentFileStore.ResolvePath(string.IsNullOrEmpty(s.SubsegmentLoadPath) ? "subsegment/load" : s.SubsegmentLoadPath),
+                MultiProject = IsValidMultiProject(s.SubsegmentMultiProject) ? s.SubsegmentMultiProject : "Any%",
+                PlaneRadius = s.SubsegmentPlaneRadius,
+                MinMove = s.SubsegmentMinMove,
+                SampleInterval = Mathf.Max(0.01f, s.SubsegmentSampleInterval),
+                QuietSettleSeconds = s.SubsegmentQuietSettleSeconds,
+                PlaneDebounceSeconds = s.SubsegmentPlaneDebounceSeconds,
+                RespawnJumpMeters = s.SubsegmentRespawnJumpMeters,
+                MaxSamplesPerLevel = Mathf.Max(1, s.SubsegmentMaxSamplesPerLevel),
+                MaxLeaderboardEntries = Mathf.Max(1, s.SubsegmentMaxLeaderboardEntries),
+                DebugLogging = s.SubsegmentDebugLogging,
+                DisabledLeaderboardSources = new HashSet<string>(
+                    s.GetDisabledSubsegmentSources(), System.StringComparer.OrdinalIgnoreCase),
+            };
+        }
+
+        private static bool IsValidMultiProject(string value)
+        {
+            return value == "Aztec%" || value == "Dark%" || value == "Steam%" || value == "Any%";
+        }
+    }
+
+    /// <summary>
+    /// Local subsegment processor: Recorder + Loader + Comparator + HUD data.
+    /// This is a plain polled MonoBehaviour owned by <see cref="TimerCore"/>;
+    /// TimerCore calls the lifecycle/tick hooks at the same points it processes
+    /// timing, so subsegment sampling shares the authoritative game-time clock.
+    /// </summary>
+    public sealed class SubsegmentManager : MonoBehaviour
+    {
+        public static SubsegmentManager Instance { get; private set; }
+
+        private SubsegmentOptions _options;
+
+        // Recorder state
+        private readonly List<SubsegmentSample> _currentSamples = new List<SubsegmentSample>();
+        private Vector3? _lastSamplePosition;
+        private double _lastSampleGameTime = -1d;
+        private int _nextSeq;
+        private bool _firstAwake;
+        // True after this level's cumulative sample count hit the configured
+        // cap; sampling is stopped for the rest of the level and the buffered
+        // samples are discarded so the level cannot contribute a PB.
+        private bool _samplingCapped;
+
+        // True only when the CURRENT level was allowed to record. It is
+        // decided once in OnLevelStart from the effective enabled state. If a
+        // match suppresses the module (or starts) at any point during the
+        // level, sampling stays off for the rest of that level: resuming
+        // mid-level would record a trajectory with a hole (and could write a
+        // bogus PB), so recording only ever restarts at the next level start.
+        private bool _samplingAllowedForLevel;
+
+        // Loader/comparator state. During a level transition we keep the
+        // previous level's visible leaderboard in _displayReferences until the
+        // new level settles its first subsegment diff; _references always holds
+        // the active detection set for the current level/project. This applies
+        // to both multi-run (ML) and single-level (IL) transitions.
+        private List<SubsegmentReference> _references = new List<SubsegmentReference>();
+        private List<SubsegmentReference> _displayReferences;
+        private string _leaderboardTitle = "";
+        // True while a completed level is advancing to the next one and the
+        // previous leaderboard is being kept on screen (covers the loading gap
+        // before the next OnLevelStart snapshots it into _displayReferences).
+        private bool _preservingDisplay;
+
+        // Multi-run (ML) tracking
+        private bool _multiRunCandidate;
+        private bool _multiRunActive;
+        private readonly List<string> _multiRunLevelIds = new List<string>();
+        private readonly Dictionary<string, List<SubsegmentSample>> _multiRunSamples = new Dictionary<string, List<SubsegmentSample>>();
+        private int _lastCompletedLevelNumber = -1;
+        private long _multiRunTotalMs;
+
+        // Runtime multi-project used by the ML leaderboard. It starts from the
+        // configured Subsegment.MultiProject when a multi-run begins and may
+        // upgrade within the session only (Aztec% -> Dark% -> Steam% -> Any%);
+        // the config value is never modified.
+        private string _activeMultiProject = "Any%";
+        private string _pendingMultiProject;
+        // New level's title to switch to once its first subsegment settles
+        // during a preserved single-level (IL) transition.
+        private string _pendingLeaderboardTitle;
+
+        // Level identity snapshotted at segment start. The game clears
+        // Game.currentLevelNumber and Game.workshopLevel in AfterUnload before
+        // the engine observes the level-ending Inactive transition, so PB
+        // writes at level end must use these captured ids (R8.2.3), not the
+        // already-cleared live game fields.
+        private string _currentLevelId = "";
+        private string _currentIlLevelId = "";
+
+        private void Awake()
+        {
+            Instance = this;
+            _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
+            EnsureLoadDirectory();
+        }
+
+        private void EnsureLoadDirectory()
+        {
+            if (string.IsNullOrEmpty(_options.LoadPath))
+                return;
+            try
+            {
+                Directory.CreateDirectory(_options.LoadPath);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger.LogWarning($"TwilightTimer: failed to create subsegment load directory '{_options.LoadPath}': {ex.Message}");
+            }
+        }
+
+        private static SettingsModel SettingsFromConfig()
+            => ConfigService.Instance != null ? ConfigService.Instance.Settings : new SettingsModel();
+
+        /// <summary>True during an official-campaign multi-run attempt (candidate or active).</summary>
+        public bool InMultiRunActive => _multiRunCandidate || _multiRunActive;
+
+        /// <summary>
+        /// True while a completed level's leaderboard is being kept on screen
+        /// across the loading transition to the next level, before the next
+        /// level has had a chance to settle its first subsegment.
+        /// </summary>
+        public bool InPreservedTransition => _preservingDisplay;
+
+        /// <summary>Title shown above the leaderboard: the active multi-run project (session-upgraded) or the current level name.</summary>
+        public string LeaderboardTitle => _leaderboardTitle;
+
+        /// <summary>Current sorted leaderboard data (already truncated to MaxLeaderboardEntries).</summary>
+        public List<SubsegmentReference> Entries
+        {
+            get
+            {
+                var source = _displayReferences ?? _references;
+                if (!Enabled || source.Count == 0) return new List<SubsegmentReference>();
+                var visible = source.Where(r => _options.IsReferenceEnabled(r.DisplayId)).ToList();
+                var with = visible.Where(r => r.DiffMs.HasValue)
+                    .OrderByDescending(r => r.DiffMs.Value)
+                    .ThenBy(r => r.DisplayId, StringComparer.Ordinal);
+                var without = visible.Where(r => !r.DiffMs.HasValue)
+                    .OrderBy(r => r.DisplayId, StringComparer.Ordinal);
+                return with.Concat(without).Take(_options.MaxLeaderboardEntries).ToList();
+            }
+        }
+
+        public SubsegmentOptions Options => _options;
+
+        /// <summary>
+        /// True while a Twilight Cup match session forces the module off (T7.5).
+        /// The user's <c>Subsegment.Enable</c> setting is never modified, so the
+        /// feature comes back by itself once the match ends.
+        /// </summary>
+        public bool MatchSuppressed => MatchMode.Active;
+
+        /// <summary>
+        /// The effective enabled state: the user's setting AND not suppressed by
+        /// an active match. Every internal gate uses this, so a match disables
+        /// sampling, reference loading, diffing, PB writes and the leaderboard
+        /// in one place.
+        /// </summary>
+        public bool Enabled => _options.Enable && !MatchMode.Active;
+
+        /// <summary>
+        /// Whether the current level is allowed to record. False when the level
+        /// started while suppressed by a match, even if the match has since
+        /// ended — recording resumes at the next level start (T7.5).
+        /// </summary>
+        public bool SamplingAllowedForLevel => _samplingAllowedForLevel;
+
+        /// <summary>
+        /// Called by <see cref="MatchMode.Enter"/>: drop any level-local runtime
+        /// and mark the current level ineligible so a match cannot leave a
+        /// partial trajectory behind.
+        /// </summary>
+        public void OnMatchModeEnter()
+        {
+            _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
+            _samplingAllowedForLevel = false;
+            ClearRuntime();
+            Plugin.Logger.LogInfo("TwilightTimer: subsegment disabled for the match (local comparison is off until the match ends).");
+        }
+
+        /// <summary>
+        /// Called by <see cref="MatchMode.Exit"/>: drop runtime state. Recording
+        /// does not resume mid-level — the next level start re-enables it.
+        /// </summary>
+        public void OnMatchModeExit()
+        {
+            _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
+            _samplingAllowedForLevel = false;
+            ClearRuntime();
+            Plugin.Logger.LogInfo("TwilightTimer: match ended; subsegment resumes at the next level.");
+        }
+
+        /// <summary>Called by the engine when a new segment (level) starts.</summary>
+        public void OnLevelStart(Game game, RunState state)
+        {
+            _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
+            // Decide recording eligibility for this whole level once. A match
+            // active at level start (or later) keeps this level out of the
+            // record entirely (T7.5).
+            _samplingAllowedForLevel = Enabled;
+            if (!Enabled)
+            {
+                ClearRuntime();
+                return;
+            }
+
+            // Level display continuity: advancing from one level to the next
+            // keeps the previous level's visible leaderboard (values and title)
+            // on screen until the new level settles its first subsegment diff
+            // (R8.5.6 / follow-up UX). _displayReferences holds that snapshot
+            // while _references is swapped to the current level's detection set
+            // as soon as the new level starts. This applies to both multi-run
+            // (ML) and single-level (IL) transitions.
+            bool wasMultiRun = _multiRunCandidate || _multiRunActive;
+            bool wasMultiActive = _multiRunActive;
+            bool preserveDisplay = !state.Retrying
+                && (_displayReferences != null || _references.Count > 0);
+            List<SubsegmentReference> previousVisible = _displayReferences ?? _references;
+
+            // Multi-run tracking (R8.3.2): a menu-entered B0 begins a candidate;
+            // reaching B1 upgrades it to an active multi-run display. Any other
+            // new non-retry level starts a standalone/IL segment. An LC collection
+            // run is not TwilightTimer's official-campaign multi-run, so it does not
+            // enter ML tracking here.
+            bool inCollectionRun = LcIntegration.Instance != null && LcIntegration.Instance.IsInCollectionRun;
+            if (!state.Retrying && !inCollectionRun
+                && game.currentLevelType == WorkshopItemSource.BuiltIn && game.currentLevelNumber == 0)
+            {
+                _multiRunCandidate = true;
+                _multiRunActive = false;
+                _multiRunLevelIds.Clear();
+                _multiRunSamples.Clear();
+                _lastCompletedLevelNumber = -1;
+                _multiRunTotalMs = 0L;
+                _activeMultiProject = _options.MultiProject;
+                _pendingMultiProject = null;
+            }
+            else if (_multiRunCandidate && game.currentLevelNumber == 1)
+            {
+                _multiRunActive = true;
+            }
+            else if (_multiRunCandidate && game.currentLevelNumber != 0 && !_multiRunActive)
+            {
+                // A page-advance to B1 should have set active above; this branch
+                // is defensive for levels skipped from a B0-only run.
+                _multiRunActive = true;
+            }
+
+            _displayReferences = preserveDisplay ? previousVisible : null;
+            _preservingDisplay = false;
+            _references = new List<SubsegmentReference>();
+            bool enteringMulti = !wasMultiActive && _multiRunActive && game.currentLevelNumber != 0;
+
+            ClearRecorder();
+
+            // Capture the level identity now, while Game.currentLevelNumber and
+            // Game.workshopLevel are still populated. The game clears both when
+            // the level ends (AfterUnload -> Inactive), but PB writes happen at
+            // level end, so they must use this snapshot (R8.2.3).
+            _currentLevelId = GetLevelId(game);
+            _currentIlLevelId = GetIlLevelId(game);
+
+            if (_multiRunActive && game.currentLevelNumber != 0)
+                LoadMlReferencesForLevel(game, enteringMulti);
+            else
+                LoadReferences(game);
+
+            // If the new level/project has no reference data or no detection
+            // planes at all, there will never be a first settled diff to switch
+            // on — don't leave the previous level's leaderboard on screen
+            // (R8.4.6.1 / R8.4.6.2).
+            bool canSettle = _references.Any(r => r.Planes.Count > 0);
+            if (_displayReferences != null && !canSettle)
+            {
+                if (_pendingMultiProject != null)
+                    ActivatePendingLeaderboard();
+                else
+                {
+                    _leaderboardTitle = GetCurrentLevelDisplayName(game);
+                    _pendingLeaderboardTitle = null;
+                    _displayReferences = null;
+                }
+            }
+
+            if (_options.DebugLogging)
+                Plugin.Logger.LogInfo($"TwilightTimer: subsegment loaded {_references.Count} reference(s) for {GetLevelId(game)} (multi={_multiRunActive}).");
+        }
+
+        /// <summary>Called by the engine when the current segment ends, before the auto-reset clear.</summary>
+        public void OnLevelEnd(Game game, RunState state, double endTime, bool completed, bool retrying, GameState nowGameState, AppSate nowAppState)
+        {
+            UpdateOptions();
+            // No PB may be written for a level that was suppressed by a match
+            // (T7.5), even if the match ended before the level did.
+            if (!Enabled || !_samplingAllowedForLevel)
+            {
+                ClearRuntime();
+                return;
+            }
+
+            if (retrying)
+            {
+                ClearRecorder();
+                _displayReferences = null;
+                _leaderboardTitle = "";
+                _pendingMultiProject = null;
+                _pendingLeaderboardTitle = null;
+                _preservingDisplay = false;
+                return;
+            }
+
+            if (completed && _firstAwake)
+                AddFinalSample(_multiRunActive ? endTime : Math.Max(0d, endTime - state.SegmentStart));
+
+            // TimerCore.EndSegment runs tag OnLevelExit before this hook, so
+            // final-validity checks (R4.2 checkpoint-final / voiceline) have
+            // already raised any invalid flag; an invalid run never gets a PB.
+            bool valid = !state.Flags.IsInvalid;
+            // Use the ids captured at segment start: the game clears
+            // currentLevelNumber / workshopLevel before the level-ending
+            // transition is observed, so reading them from `game` here would
+            // collapse every EditorPick to E-1 and every Workshop level to W-1.
+            string levelId = !string.IsNullOrEmpty(_currentLevelId) ? _currentLevelId : GetLevelId(game);
+            string ilLevelId = !string.IsNullOrEmpty(_currentIlLevelId) ? _currentIlLevelId : GetIlLevelId(game);
+            bool multiRunEnded = false;
+
+            if (completed)
+            {
+                if (valid)
+                    WriteIlPb(ilLevelId, state, (long)Math.Round(endTime * 1000.0));
+
+                // Track ML run contents/endpoint.
+                if (_multiRunCandidate)
+                {
+                    var copy = new List<SubsegmentSample>(_currentSamples);
+                    if (copy.Count > 0)
+                    {
+                        if (!_multiRunSamples.ContainsKey(levelId))
+                            _multiRunLevelIds.Add(levelId);
+                        _multiRunSamples[levelId] = copy;
+                    }
+                    _lastCompletedLevelNumber = game.currentLevelNumber;
+                    _multiRunTotalMs = (long)Math.Round(endTime * 1000.0);
+                }
+
+                // Each completed multi-run endpoint is also its own subproject
+                // PB (Aztec% / Dark% / Steam% / Any%). Writing at the moment the
+                // endpoint is reached records the run's contained sub-projects
+                // even when the player keeps going (e.g. Any% also refreshes
+                // Aztec% if the run through Aztec was faster). WriteMultiPb is
+                // idempotent for a given subproject because it compares against
+                // the existing meta total_ms.
+                if (_multiRunCandidate && valid && IsMultiEndLevel(game.currentLevelNumber))
+                    WriteMultiPb(state);
+
+                // R8.3.2.2.3: Any% ends with Intro_Reprise (B12). The run is
+                // complete here even though the game immediately loads Credits,
+                // so clear the multi-run tracking after writing (no later exit
+                // should re-write it).
+                if (_multiRunCandidate && game.currentLevelType == WorkshopItemSource.BuiltIn && game.currentLevelNumber == 12)
+                {
+                    ClearMultiRun();
+                    multiRunEnded = true;
+                }
+            }
+
+            // Leaving through Inactive ends the segment and, for a multi-run,
+            // may be the moment the run's PB is finalized (after completing an
+            // endpoint). Clear all level-local runtime so the HUD/state are
+            // reset and the next segment loads fresh references.
+            if (!retrying && nowGameState == GameState.Inactive)
+            {
+                if (_multiRunCandidate && valid && IsMultiEndLevel(_lastCompletedLevelNumber))
+                    WriteMultiPb(state);
+                if (_options.DebugLogging)
+                    Plugin.Logger.LogInfo($"TwilightTimer: subsegment level end (completed={completed}, valid={valid}, samples={_currentSamples.Count}).");
+                ClearRuntime();
+                return;
+            }
+
+            // A completed level advances through LoadingLevel into the next
+            // level. Keep the current leaderboard display intact across that
+            // transition (both ML and IL); OnLevelStart snapshots it and the
+            // display refreshes on the first new-level diff. A just-finished
+            // final multi-run level (Credits load) is not preserved.
+            if (!retrying && !multiRunEnded && nowGameState == GameState.LoadingLevel)
+            {
+                _preservingDisplay = true;
+                if (_options.DebugLogging)
+                    Plugin.Logger.LogInfo($"TwilightTimer: subsegment level end (completed={completed}, valid={valid}, samples={_currentSamples.Count}); preserving leaderboard across transition.");
+                return;
+            }
+
+            if (_options.DebugLogging)
+                Plugin.Logger.LogInfo($"TwilightTimer: subsegment level end (completed={completed}, valid={valid}, samples={_currentSamples.Count}).");
+            ClearRecorder();
+            _displayReferences = null;
+            _leaderboardTitle = "";
+            _pendingMultiProject = null;
+            _pendingLeaderboardTitle = null;
+            _preservingDisplay = false;
+        }
+
+        /// <summary>Called before an auto-reset / menu-entry full reset, i.e. a run exits without using the manual reset key.</summary>
+        public void OnRunExit()
+        {
+            UpdateOptions();
+            if (!Enabled || !_samplingAllowedForLevel)
+            {
+                ClearRuntime();
+                return;
+            }
+            var state = TimerCore.State;
+            if (state != null && !state.Flags.IsInvalid && _multiRunCandidate && IsMultiEndLevel(_lastCompletedLevelNumber))
+                WriteMultiPb(state);
+            ClearRuntime();
+        }
+
+        /// <summary>Called from full-run reset/manual reset: discard without writing PB.</summary>
+        public void OnRunReset()
+        {
+            ClearRuntime();
+        }
+
+        /// <summary>Called when a one-key retry starts (R8.1.5.1 / R8.5.6.1).</summary>
+        public void OnRetryStart()
+        {
+            ClearRuntime();
+        }
+
+        /// <summary>Per-physics-frame hook: sample recording + crossing detection.</summary>
+        public void OnPhysicsTick(Game game, GameState gState, RunState state)
+        {
+            UpdateOptions();
+            if (!Enabled || !_samplingAllowedForLevel || !state.InSegment || gState != GameState.PlayingLevel)
+                return;
+
+            var pos = GetCurrentPosition();
+            if (pos == null) return;
+
+            double time = SampleTime(state);
+            EnsureAwakeSample(time, pos.Value);
+            if (!_firstAwake)
+                return;
+
+            // Once the per-level sample cap has been hit, sampling is stopped
+            // for the rest of this level; only real-time crossing detection
+            // continues.
+            if (_samplingCapped)
+            {
+                RunCrossingDetection(pos.Value, time);
+                return;
+            }
+
+            if (time - _lastSampleGameTime >= _options.SampleInterval)
+                AddRegularSample(time, pos.Value);
+
+            RunCrossingDetection(pos.Value, time);
+        }
+
+        /// <summary>
+        /// Time base for subsegment recording and diffs. In multi-run (ML)
+        /// mode the recorder keeps cumulative game time so per-level ML files
+        /// stay cumulative; in single-level (IL) mode it uses the current
+        /// segment's time (<c>GameTime - SegmentStart</c>) so comparisons
+        /// against segment-relative IL references stay correct even when a
+        /// multi-level run is in progress.
+        /// </summary>
+        private double SampleTime(RunState state)
+            => _multiRunActive ? state.GameTime : Math.Max(0d, state.GameTime - state.SegmentStart);
+
+        /// <summary>Per-render-frame hook: quiet-settle timers (runs even while paused, R8.4.3.4).</summary>
+        public void OnUpdate()
+        {
+            UpdateOptions();
+            if (!Enabled)
+                return;
+
+            float now = Time.unscaledTime;
+            bool firstSettled = false;
+            foreach (var reference in _references)
+            {
+                foreach (var plane in reference.Planes)
+                {
+                    if (!plane.HasQuiet) continue;
+                    if (now - plane.QuietStartUnscaledTime < _options.QuietSettleSeconds) continue;
+                    long? hit = plane.CandidateHitMs;
+                    if (hit.HasValue)
+                    {
+                        // The very first settled diff of a new multi-run level is
+                        // the switch point: the previous level's leaderboard stays
+                        // on screen until then, then the new project takes over.
+                        if (_displayReferences != null && !reference.DiffMs.HasValue)
+                            firstSettled = true;
+                        reference.DiffMs = hit.Value - plane.TMs;
+                    }
+                    plane.HasQuiet = false;
+                    plane.CandidateHitMs = null;
+                    if (_options.DebugLogging)
+                        Plugin.Logger.LogInfo($"TwilightTimer: subsegment settled '{reference.DisplayId}' plane seq {plane.Seq} diff_ms={reference.DiffMs}");
+                }
+            }
+
+            if (firstSettled)
+                ActivatePendingLeaderboard();
+        }
+
+        private void UpdateOptions()
+            => _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
+
+        // ── Recorder ──────────────────────────────────────────────────────
+
+        private void ClearRecorder()
+        {
+            _currentSamples.Clear();
+            _lastSamplePosition = null;
+            _lastSampleGameTime = -1d;
+            _nextSeq = 0;
+            _firstAwake = false;
+            _samplingCapped = false;
+            foreach (var reference in _references)
+            {
+                reference.DiffMs = null;
+                foreach (var plane in reference.Planes)
+                {
+                    plane.HasPrevD = false;
+                    plane.HasQuiet = false;
+                    plane.CandidateHitMs = null;
+                    plane.LastDebounceUnscaledTime = float.NegativeInfinity;
+                }
+            }
+        }
+
+        private void ClearRuntime()
+        {
+            _references = new List<SubsegmentReference>();
+            _displayReferences = null;
+            _leaderboardTitle = "";
+            _preservingDisplay = false;
+            ClearRecorder();
+            _currentLevelId = "";
+            _currentIlLevelId = "";
+            _multiRunCandidate = false;
+            _multiRunActive = false;
+            _multiRunLevelIds.Clear();
+            _multiRunSamples.Clear();
+            _lastCompletedLevelNumber = -1;
+            _multiRunTotalMs = 0L;
+            _activeMultiProject = "Any%";
+            _pendingMultiProject = null;
+            _pendingLeaderboardTitle = null;
+        }
+
+        private void ClearMultiRun()
+        {
+            _multiRunCandidate = false;
+            _multiRunActive = false;
+            _multiRunLevelIds.Clear();
+            _multiRunSamples.Clear();
+            _lastCompletedLevelNumber = -1;
+            _multiRunTotalMs = 0L;
+            _activeMultiProject = "Any%";
+            _pendingMultiProject = null;
+            _pendingLeaderboardTitle = null;
+        }
+
+        private static readonly string[] MultiProjectOrder = { "Aztec%", "Dark%", "Steam%", "Any%" };
+
+        private static string NextMultiProject(string project)
+        {
+            int idx = System.Array.IndexOf(MultiProjectOrder, project);
+            if (idx < 0 || idx >= MultiProjectOrder.Length - 1) return null;
+            return MultiProjectOrder[idx + 1];
+        }
+
+        /// <summary>
+        /// Candidate runtime ML projects to try for the current level.
+        /// On entry to multi-run mode (B0 → B1) the configured project is tried
+        /// first; if it is not Aztec% and has no data, the smallest project that
+        /// does have data is preferred (session-only fallback). On later levels
+        /// the search moves outward from the current project, so upgrades skip
+        /// projects that have no data for the level.
+        /// </summary>
+        private List<string> GetMultiProjectCandidates(bool enteringMulti)
+        {
+            var candidates = new List<string>();
+            if (enteringMulti)
+            {
+                // The session's starting project was captured at B0.
+                string selected = _activeMultiProject;
+                AddMultiProjectCandidate(candidates, selected);
+                if (selected != "Aztec%")
+                {
+                    for (int i = 0; i < MultiProjectOrder.Length; i++)
+                        AddMultiProjectCandidate(candidates, MultiProjectOrder[i]);
+                }
+            }
+            else
+            {
+                string project = _pendingMultiProject ?? _activeMultiProject;
+                while (project != null)
+                {
+                    AddMultiProjectCandidate(candidates, project);
+                    project = NextMultiProject(project);
+                }
+            }
+
+            return candidates;
+        }
+
+        private static void AddMultiProjectCandidate(List<string> candidates, string project)
+        {
+            if (string.IsNullOrEmpty(project) || candidates.Contains(project))
+                return;
+            candidates.Add(project);
+        }
+
+        /// <summary>
+        /// Load ML references for the current level, trying candidate projects
+        /// in order until one yields data. Sets <c>_pendingMultiProject</c> to
+        /// the chosen project, or null when none has data for this level.
+        /// </summary>
+        private void LoadMlReferencesForLevel(Game game, bool enteringMulti)
+        {
+            _pendingMultiProject = null;
+            foreach (var project in GetMultiProjectCandidates(enteringMulti))
+            {
+                _references = new List<SubsegmentReference>();
+                _pendingMultiProject = project;
+                LoadReferences(game);
+                if (_references.Count > 0)
+                {
+                    if (_options.DebugLogging)
+                        Plugin.Logger.LogInfo($"TwilightTimer: subsegment ML project resolved to {project} for {GetLevelId(game)}.");
+                    return;
+                }
+            }
+            _pendingMultiProject = null;
+        }
+
+        /// <summary>
+        /// Called when the current level's first subsegment diff settles during
+        /// a preserved multi-run transition. The pending project becomes active
+        /// and the previous level's displayed leaderboard is replaced.
+        /// </summary>
+        private void ActivatePendingLeaderboard()
+        {
+            if (_pendingMultiProject != null)
+            {
+                _activeMultiProject = _pendingMultiProject;
+                _leaderboardTitle = _activeMultiProject;
+                _pendingMultiProject = null;
+            }
+            else if (_pendingLeaderboardTitle != null)
+            {
+                _leaderboardTitle = _pendingLeaderboardTitle;
+                _pendingLeaderboardTitle = null;
+            }
+            _displayReferences = null;
+            if (_options.DebugLogging)
+                Plugin.Logger.LogInfo($"TwilightTimer: subsegment leaderboard switched to {_activeMultiProject}.");
+        }
+
+        /// <summary>
+        /// Per-level sample cap (R8.1.6). Once the cumulative sample count for
+        /// this level reaches <c>MaxSamplesPerLevel</c>, the next sample would
+        /// exceed it: stop sampling for the rest of the level and discard the
+        /// samples buffered in memory, so this level never contributes a PB.
+        /// The real-time comparison (R8.4) keeps running on the current frame
+        /// position. State resets with <see cref="ClearRecorder"/> on the next
+        /// level / retry.
+        /// </summary>
+        private void TryStopSamplingAtCap()
+        {
+            if (_samplingCapped) return;
+            if (_options.MaxSamplesPerLevel <= 0 || _currentSamples.Count < _options.MaxSamplesPerLevel)
+                return;
+
+            _samplingCapped = true;
+            _currentSamples.Clear();
+            _lastSamplePosition = null;
+            _lastSampleGameTime = -1d;
+            _nextSeq = 0;
+            if (_options.DebugLogging)
+                Plugin.Logger.LogInfo($"TwilightTimer: subsegment sample cap ({_options.MaxSamplesPerLevel}) exceeded; stopped sampling for this level and discarded its buffered samples.");
+        }
+
+        private void EnsureAwakeSample(double gameTime, Vector3 pos)
+        {
+            if (_firstAwake) return;
+            TryStopSamplingAtCap();
+            if (_samplingCapped) return;
+            var human = Human.Localplayer;
+            if (human == null) return;
+            if (human.state == HumanState.Spawning || human.state == HumanState.Unconscious || human.state == HumanState.Dead)
+                return;
+
+            _firstAwake = true;
+            _lastSampleGameTime = gameTime;
+            _lastSamplePosition = pos;
+            _currentSamples.Add(new SubsegmentSample
+            {
+                seq = _nextSeq++,
+                level_index = GetLevelIndex(),
+                t_ms = (long)Math.Round(gameTime * 1000.0),
+                px = pos.x,
+                py = pos.y,
+                pz = pos.z,
+                dx = 0f,
+                dy = 0f,
+                dz = 0f,
+                plane_radius = _options.PlaneRadius,
+            });
+        }
+
+        private void AddRegularSample(double gameTime, Vector3 pos)
+        {
+            TryStopSamplingAtCap();
+            if (_samplingCapped) return;
+            float dx = 0f, dy = 0f, dz = 0f;
+            if (_lastSamplePosition.HasValue)
+            {
+                Vector3 d = pos - _lastSamplePosition.Value;
+                if (d.magnitude >= _options.MinMove)
+                {
+                    dx = d.x;
+                    dy = d.y;
+                    dz = d.z;
+                }
+            }
+            _currentSamples.Add(new SubsegmentSample
+            {
+                seq = _nextSeq++,
+                level_index = GetLevelIndex(),
+                t_ms = (long)Math.Round(gameTime * 1000.0),
+                px = pos.x,
+                py = pos.y,
+                pz = pos.z,
+                dx = dx,
+                dy = dy,
+                dz = dz,
+                plane_radius = _options.PlaneRadius,
+            });
+            _lastSamplePosition = pos;
+            _lastSampleGameTime = gameTime;
+        }
+
+        private void AddFinalSample(double endTime)
+        {
+            TryStopSamplingAtCap();
+            if (_samplingCapped) return;
+            var pos = GetCurrentPosition();
+            if (pos == null) return;
+            float dx = 0f, dy = 0f, dz = 0f;
+            if (_lastSamplePosition.HasValue)
+            {
+                Vector3 d = pos.Value - _lastSamplePosition.Value;
+                if (d.magnitude >= _options.MinMove)
+                {
+                    dx = d.x;
+                    dy = d.y;
+                    dz = d.z;
+                }
+            }
+            _currentSamples.Add(new SubsegmentSample
+            {
+                seq = _nextSeq++,
+                level_index = GetLevelIndex(),
+                t_ms = (long)Math.Round(endTime * 1000.0),
+                px = pos.Value.x,
+                py = pos.Value.y,
+                pz = pos.Value.z,
+                dx = dx,
+                dy = dy,
+                dz = dz,
+                plane_radius = _options.PlaneRadius,
+            });
+            _lastSamplePosition = pos;
+            _lastSampleGameTime = endTime;
+        }
+
+        private Vector3? GetCurrentPosition()
+        {
+            var human = Human.Localplayer;
+            if (human == null || human.transform == null) return null;
+            return human.transform.position;
+        }
+
+        private int GetLevelIndex()
+        {
+            var state = TimerCore.State;
+            if (state == null) return 0;
+            // IL samples always use level_index 0 (R8.3.1.3). ML samples use the
+            // actual BuiltIn index from the moment the run is in multi mode.
+            return _multiRunActive ? state.CurrentLevelNumber : 0;
+        }
+
+        // ── Loader ────────────────────────────────────────────────────────
+
+        private string GetCategoryKey()
+        {
+            var cfg = ConfigService.Instance;
+            if (cfg == null || cfg.EnabledTags == null || cfg.EnabledTags.Tags.Count == 0)
+                return "Any";
+            var sorted = new List<string>(cfg.EnabledTags.Tags);
+            sorted.Sort(StringComparer.Ordinal);
+            return string.Join("+", sorted);
+        }
+
+        /// <summary>
+        /// Machine level id used by the multi-run (ML) per-level files and as a
+        /// fallback (R8.2.3). Delegates to <see cref="LevelIdentity"/>.
+        /// </summary>
+        private string GetLevelId(Game game) => LevelIdentity.MachineLevelId(game);
+
+        /// <summary>
+        /// IL persistence id (R8.2.3 IL rule): English localized name for
+        /// BuiltIn / EditorPick, numeric workshop id for Workshop levels.
+        /// Delegates to <see cref="LevelIdentity"/>. Subsegment deliberately keeps
+        /// the legacy LocalWorkshop fallback (<c>W{levelNumber}</c>) so existing
+        /// PB directories stay addressable.
+        /// </summary>
+        private string GetIlLevelId(Game game) => LevelIdentity.CurrentLevelKey(game, folderFallbackForLocalWorkshop: false);
+
+        private string GetCurrentLevelDisplayName(Game game)
+        {
+            if (game.currentLevelType == WorkshopItemSource.BuiltIn
+                || game.currentLevelType == WorkshopItemSource.EditorPick)
+            {
+                string internalName = LevelIdentity.OfficialInternalName(game, game.currentLevelNumber);
+                if (!string.IsNullOrEmpty(internalName))
+                    return LevelIdentity.EnglishLevelName("LEVEL/" + internalName, internalName);
+            }
+            if (game.workshopLevel != null && !string.IsNullOrEmpty(game.workshopLevel.title))
+                return game.workshopLevel.title;
+            return GetLevelId(game);
+        }
+
+
+        private string MultiProjectForLoading
+            => _pendingMultiProject ?? _activeMultiProject ?? _options.MultiProject;
+
+        private void LoadReferences(Game game)
+        {
+            _references.Clear();
+            if (_displayReferences == null)
+            {
+                _leaderboardTitle = (_multiRunActive && game.currentLevelNumber != 0)
+                    ? MultiProjectForLoading
+                    : GetCurrentLevelDisplayName(game);
+                _pendingLeaderboardTitle = null;
+            }
+            else if (!_multiRunActive)
+            {
+                // Preserved IL transition: remember the new level's title so the
+                // leaderboard switches to it on the first settled diff.
+                _pendingLeaderboardTitle = GetCurrentLevelDisplayName(game);
+            }
+            try
+            {
+                string category = GetCategoryKey();
+
+                if (_multiRunActive && game.currentLevelNumber != 0)
+                {
+                    LoadPbMl(_currentLevelId, category);
+                    LoadLoadMl(_currentLevelId, category);
+                }
+                else
+                {
+                    LoadPbIl(_currentIlLevelId, category);
+                    LoadLoadIl(_currentIlLevelId, category);
+                }
+            }
+            catch (Exception ex)
+            {
+                _references.Clear();
+                Plugin.Logger.LogWarning($"TwilightTimer: subsegment load failed gracefully: {ex.Message}");
+            }
+        }
+
+        private void LoadPbIl(string levelId, string category)
+        {
+            if (string.IsNullOrEmpty(_options.PBPath)) return;
+            TryAddIlReference(Path.Combine(_options.PBPath, "IL", levelId, category), "PB");
+        }
+
+        private void LoadLoadIl(string levelId, string category)
+        {
+            if (string.IsNullOrEmpty(_options.LoadPath) || !Directory.Exists(_options.LoadPath)) return;
+            foreach (var dir in Directory.GetDirectories(_options.LoadPath))
+            {
+                string display = Path.GetFileName(dir);
+                if (string.IsNullOrEmpty(display)) continue;
+                TryAddIlReference(Path.Combine(dir, "IL", levelId, category), display);
+            }
+        }
+
+        private void LoadPbMl(string levelId, string category)
+        {
+            if (string.IsNullOrEmpty(_options.PBPath)) return;
+            TryAddMlReference(Path.Combine(_options.PBPath, "ML", MultiProjectForLoading, category), "PB", levelId);
+        }
+
+        private void LoadLoadMl(string levelId, string category)
+        {
+            if (string.IsNullOrEmpty(_options.LoadPath) || !Directory.Exists(_options.LoadPath)) return;
+            foreach (var dir in Directory.GetDirectories(_options.LoadPath))
+            {
+                string display = Path.GetFileName(dir);
+                if (string.IsNullOrEmpty(display)) continue;
+                TryAddMlReference(Path.Combine(dir, "ML", MultiProjectForLoading, category), display, levelId);
+            }
+        }
+
+        private void TryAddIlReference(string refDir, string displayId)
+        {
+            if (string.IsNullOrEmpty(refDir) || !Directory.Exists(refDir)) return;
+            string metaPath = Path.Combine(refDir, "meta.json");
+            string samplePath = Path.Combine(refDir, "sample.jsonl");
+            AddReference(displayId, refDir, metaPath, samplePath);
+        }
+
+        private void TryAddMlReference(string refDir, string displayId, string levelId)
+        {
+            if (string.IsNullOrEmpty(refDir) || !Directory.Exists(refDir)) return;
+            string metaPath = Path.Combine(refDir, "meta.json");
+            string levelPath = Path.Combine(refDir, "levels", levelId + ".jsonl");
+            AddReference(displayId, refDir, metaPath, levelPath);
+        }
+
+        private void AddReference(string displayId, string refDir, string metaPath, string samplePath)
+        {
+            if (!SubsegmentFileStore.TryLoadMeta(metaPath, out var meta))
+                return;
+            if (!SubsegmentFileStore.TryLoadSamples(samplePath, out var samples) || samples.Count == 0)
+                return;
+
+            var reference = new SubsegmentReference
+            {
+                DisplayId = displayId,
+                SourcePath = refDir,
+                Samples = samples,
+            };
+            BuildPlanes(reference, samples);
+            _references.Add(reference);
+        }
+
+        private void BuildPlanes(SubsegmentReference reference, List<SubsegmentSample> samples)
+        {
+            foreach (var sample in samples)
+            {
+                Vector3 d = sample.Displacement;
+                if (d.magnitude < _options.MinMove) continue;
+                Vector3 normal = d.normalized;
+                float radius = sample.plane_radius > 0f ? sample.plane_radius : _options.PlaneRadius;
+                reference.Planes.Add(new SubsegmentPlane
+                {
+                    Seq = sample.seq,
+                    TMs = sample.t_ms,
+                    Position = sample.Position,
+                    Normal = normal,
+                    Radius = radius,
+                });
+            }
+        }
+
+        // ── Comparator ────────────────────────────────────────────────────
+
+        private void RunCrossingDetection(Vector3 pos, double time)
+        {
+            foreach (var reference in _references)
+            {
+                foreach (var plane in reference.Planes)
+                {
+                    Vector3 offset = pos - plane.Position;
+                    float d = Vector3.Dot(offset, plane.Normal);
+                    float lateralSq = (offset - plane.Normal * d).sqrMagnitude;
+                    if (!plane.HasPrevD)
+                    {
+                        plane.PrevD = d;
+                        plane.HasPrevD = true;
+                        continue;
+                    }
+
+                    if (plane.PrevD < 0f && d >= 0f && lateralSq <= plane.Radius * plane.Radius)
+                    {
+                        float now = Time.unscaledTime;
+                        if (now - plane.LastDebounceUnscaledTime < _options.PlaneDebounceSeconds)
+                        {
+                            plane.PrevD = d;
+                            continue;
+                        }
+
+                        if (IsStaleLoop(plane, pos, out bool uncertain))
+                        {
+                            plane.PrevD = d;
+                            if (!uncertain && _options.DebugLogging)
+                                Plugin.Logger.LogInfo($"TwilightTimer: subsegment suppressed stale loop '{reference.DisplayId}' plane seq {plane.Seq}.");
+                            continue;
+                        }
+
+                        long hitMs = (long)Math.Round(time * 1000.0);
+                        plane.CandidateHitMs = hitMs;
+                        plane.QuietStartUnscaledTime = Time.unscaledTime;
+                        plane.HasQuiet = true;
+                        plane.LastDebounceUnscaledTime = Time.unscaledTime;
+                        if (_options.DebugLogging)
+                            Plugin.Logger.LogInfo($"TwilightTimer: subsegment crossing candidate '{reference.DisplayId}' plane seq {plane.Seq} at {hitMs} ms.");
+                    }
+                    plane.PrevD = d;
+                }
+            }
+        }
+
+        private bool IsStaleLoop(SubsegmentPlane plane, Vector3 currentPos, out bool uncertain)
+        {
+            uncertain = false;
+            if (_currentSamples.Count == 0) return false;
+
+            // Find the player's earliest sample whose position is already within
+            // this plane and whose time is before the reference sample. We also
+            // require the earlier sample to be on the *positive/after* side of
+            // the plane (same side as a completed crossing). Otherwise a normal
+            // approach through a wide 50 m plane would be misclassified as a
+            // stale loop just because the player was already near the plane.
+            int startIndex = -1;
+            for (int i = 0; i < _currentSamples.Count; i++)
+            {
+                var s = _currentSamples[i];
+                if (s.t_ms >= plane.TMs) continue;
+                if ((s.Position - plane.Position).sqrMagnitude > plane.Radius * plane.Radius) continue;
+                if (Vector3.Dot(s.Position - plane.Position, plane.Normal) < 0f) continue;
+                startIndex = i;
+                break;
+            }
+            if (startIndex < 0) return false;
+
+            // Check sample continuity from that point to now. A large jump means
+            // the player failed/rewound and this crossing is legitimate; a gap in
+            // seq (e.g. mid-run save/load) is treated conservatively as NOT a
+            // stale loop (R8.4.4.4).
+            for (int i = startIndex + 1; i < _currentSamples.Count; i++)
+            {
+                var prev = _currentSamples[i - 1];
+                var cur = _currentSamples[i];
+                if (cur.seq != prev.seq + 1)
+                {
+                    uncertain = true;
+                    return false;
+                }
+                if ((cur.Position - prev.Position).magnitude > _options.RespawnJumpMeters)
+                    return false;
+            }
+
+            // Also ensure continuity from the last sample to the current frame.
+            if (_currentSamples.Count > 0)
+            {
+                var last = _currentSamples[_currentSamples.Count - 1];
+                if ((currentPos - last.Position).magnitude > _options.RespawnJumpMeters)
+                    return false;
+            }
+
+            return true;
+        }
+
+        // ── PB writing ────────────────────────────────────────────────────
+
+        private void WriteIlPb(string levelId, RunState state, long endTimeMs)
+        {
+            if (_currentSamples.Count == 0)
+                return;
+            string category = GetCategoryKey();
+            string dir = Path.Combine(_options.PBPath, "IL", levelId, category);
+            string metaPath = Path.Combine(dir, "meta.json");
+
+            // IL PB files are per-level: level_index is always 0 and t_ms is
+            // relative to the segment start. During an active multi-run the
+            // recorder holds cumulative game-time samples (which are correct for
+            // the ML files), so normalize a copy before writing the IL record;
+            // in IL mode the samples are already segment-relative.
+            long levelStartMs = (long)Math.Round(state.SegmentStart * 1000.0);
+            bool normalizeForIl = _multiRunActive;
+            long totalMs = Math.Max(0L, endTimeMs - levelStartMs);
+            if (SubsegmentFileStore.TryReadTotalMs(metaPath, out long existing) && existing <= totalMs)
+                return;
+
+            var ilSamples = new List<SubsegmentSample>(_currentSamples.Count);
+            foreach (var s in _currentSamples)
+            {
+                ilSamples.Add(new SubsegmentSample
+                {
+                    seq = s.seq,
+                    level_index = 0,
+                    t_ms = normalizeForIl ? Math.Max(0L, s.t_ms - levelStartMs) : Math.Max(0L, s.t_ms),
+                    px = s.px,
+                    py = s.py,
+                    pz = s.pz,
+                    dx = s.dx,
+                    dy = s.dy,
+                    dz = s.dz,
+                    plane_radius = s.plane_radius,
+                });
+            }
+
+            string samplePath = Path.Combine(dir, "sample.jsonl");
+            if (!SubsegmentFileStore.WriteAtomic(samplePath, SubsegmentFileStore.MakeSampleJson(ilSamples)))
+                return;
+            string metaJson = SubsegmentFileStore.MakeMetaJson(
+                "IL", levelId, null, category, null, totalMs, ilSamples.Count);
+            if (!SubsegmentFileStore.WriteAtomic(metaPath, metaJson))
+                return;
+            Plugin.Logger.LogInfo($"TwilightTimer: subsegment PB written IL/{levelId}/{category} ({totalMs} ms, {ilSamples.Count} samples).");
+        }
+
+        private void WriteMultiPb(RunState state)
+        {
+            if (_multiRunSamples.Count == 0)
+                return;
+            string subproject = MultiSubprojectForLevel(_lastCompletedLevelNumber);
+            if (subproject == null)
+                return;
+            string category = GetCategoryKey();
+            string dir = Path.Combine(_options.PBPath, "ML", subproject, category);
+            string metaPath = Path.Combine(dir, "meta.json");
+            if (SubsegmentFileStore.TryReadTotalMs(metaPath, out long existing) && existing <= _multiRunTotalMs)
+                return;
+
+            int sampleCount = _multiRunSamples.Values.Sum(s => s.Count);
+            foreach (var kv in _multiRunSamples)
+            {
+                string samplePath = Path.Combine(dir, "levels", kv.Key + ".jsonl");
+                if (!SubsegmentFileStore.WriteAtomic(samplePath, SubsegmentFileStore.MakeSampleJson(kv.Value)))
+                    return;
+            }
+
+            string metaJson = SubsegmentFileStore.MakeMetaJson(
+                "ML", null, subproject, category, _multiRunLevelIds.ToArray(), _multiRunTotalMs, sampleCount);
+            if (!SubsegmentFileStore.WriteAtomic(metaPath, metaJson))
+                return;
+
+            Plugin.Logger.LogInfo($"TwilightTimer: subsegment PB written ML/{subproject}/{category} ({_multiRunTotalMs} ms, {sampleCount} samples).");
+        }
+
+        private static bool IsMultiEndLevel(int levelNumber)
+        {
+            return levelNumber == 8 || levelNumber == 9 || levelNumber == 10 || levelNumber == 12;
+        }
+
+        private static string MultiSubprojectForLevel(int levelNumber)
+        {
+            switch (levelNumber)
+            {
+                case 8: return "Aztec%";
+                case 9: return "Dark%";
+                case 10: return "Steam%";
+                case 12: return "Any%";
+                default: return null;
+            }
+        }
+    }
+}

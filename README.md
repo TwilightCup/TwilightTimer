@@ -1,8 +1,8 @@
-# HSRTimer
+# TwilightTimer
 
 A speedrun auto-timer plugin for *Human: Fall Flat* (`Human.exe` / `Human.app`).
 
-HSRTimer maintains a precise **game-time** clock (stepped by the game's physics
+TwilightTimer maintains a precise **game-time** clock (stepped by the game's physics
 frame, immune to lag and wall-clock manipulation), automatically detects level
 start/stop from the game's authoritative state machine, validates runs against
 configurable speedrun categories ("tags"), renders a configurable floating HUD,
@@ -15,37 +15,53 @@ and is fully localizable.
 ## Features (v1)
 
 - **Game-time engine** — discrete `Time.fixedDeltaTime` accumulation; auto
-  start/stop per level; segment and full-run tracking; pause/menu counting
-  toggles; auto-reset on menu/lobby transitions.
+  start/stop per level; segment and full-run tracking; pause time always counted
+  and menu/lobby time never counted; auto-reset on menu/lobby transitions.
+- **Real Time clock** — a parallel wall-clock timer that starts with the run,
+  keeps running through level-loading screens, and stops on the final level;
+  shown by default below Game Time and always active, with a settings toggle to
+  hide it.
 - **Standard-style HUD** — configurable ordered rows, per-character two-color
   gradient with alpha, arbitrary custom texts at any position, draggable panel.
 - **Categories & tags** — define rule sets via tags. Built-in: `Checkpoint`,
-  `NoCheckpoint`, `Jumpless`, `Voiceline`. Extensible via an `ITagRule` API.
+  `NoCheckpoint`, `Jumpless`, `Voiceline`, `Glitchless`, `NoEC`. Extensible via an
+  `ITagRule` API.
 - **Checkpoint compliance** — skip detection (with built-in exception tables)
   and final-checkpoint validation.
 - **Validity detection** — cheat codes, game-speed change, game-clock
   tampering; unforgivable vs forgivable flags.
-- **One-key retry** — instantly reload the current level.
+- **One-key retry** — instantly reload the current level, or directly enter a user-specified level by English name / Workshop ID (works from the menu too).
+- **Markers** — per-level manual trigger points (range / checkpoint / grab-object) that record each marker's first segment-time trigger and compare it against the level's own local PB; the leaderboard HUD can switch to a newest-first marker feed (absolute or relative times), and an edit mode shows 3D cubes + labels in-game.
 - **Localization** — community-translatable `key:translation` files; English is
-  the shipped base; a Simplified Chinese example is included.
+  the shipped base; a Simplified Chinese example is included. Settings-panel
+  tabs from other plugins can opt into the same language selection.
+- **In-game test console** — a `twitimer ...` command set is registered with the
+  game's dev console (`~` / `F1`) so every feature can be inspected and tested
+  from inside the game. See [TESTS.md](docs/TESTS.md).
 
 See [REQUIREMENTS.md](REQUIREMENTS.md) for the full specification.
 
 ## Install
 
 1. Install **BepInEx** for *Human: Fall Flat* (tested with BepInEx 5.x / HarmonyX).
-2. Build (see below) or obtain `HSRTimer.dll`.
-3. Copy `HSRTimer.dll` into the game's `BepInEx/plugins/` folder.
+2. Build (see below) or obtain `TwilightTimer.dll`.
+3. Copy `TwilightTimer.dll` into the game's `BepInEx/plugins/` folder.
 4. Copy the `lang/*.txt` files into the plugin runtime dir
-   `<BepInEx config dir>/HSRTimer/lang/`
+   `<BepInEx config dir>/TwilightTimer/lang/`
    (the plugin creates this dir and ships defaults on first run if absent).
-5. Launch the game; confirm `HSRTimer is loaded!` in the BepInEx console.
+5. Launch the game; confirm `TwilightTimer is loaded!` in the BepInEx console.
 
-### Optional: Level Collections
+> **Branch note (TwilightTimer)**: on the `TwilightTimer` branch — the
+> Twilight Cup special edition — this repository hard-depends on
+> **TwilightCore** and its built-in Level Collections module. The section
+> below describes the `main` branch.
 
-If the [Level Collections](https://github.com/) (`LevelCollections`) plugin is
-installed, HSRTimer integrates with it to treat a collection's final level as
-the end of a full run. HSRTimer works fine without it (declared as a soft
+### Optional: Level Collections (main branch)
+
+If the [Level Collections](https://github.com/HeyBlack233/LevelCollections)
+(`LevelCollections`) plugin is
+installed, TwilightTimer integrates with it to treat a collection's final level as
+the end of a full run. TwilightTimer works fine without it (declared as a soft
 dependency).
 
 ## Build
@@ -53,24 +69,31 @@ dependency).
 Requires the .NET SDK (`dotnet`) and the game installed via Steam.
 
 ```bash
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
+On the `TwilightTimer` branch, build TwilightCore first — the csproj
+references its built DLL (`bin/Release/netstandard2.0/TwilightCore.dll` by
+default, overridable via `-p:TWILIGHTCORE=`); see
+[docs/TWILIGHT_CUP.md](docs/TWILIGHT_CUP.md).
+
 The build resolves game/BepInEx DLL references from the default Steam install
-path (see `Directory.Build.props`). On a non-default Steam library or another
-platform, override the paths via environment variables:
+path (see `Directory.Build.props`), overridable via the gitignored
+`Directory.Build.user.props` or, on a non-default Steam library or another
+platform, via environment variables:
 
 ```bash
 GAME_MANAGED="/path/to/Human_Data/Managed" \
 BEPINEX_CORE="/path/to/BepInEx/core" \
-dotnet build src/HSRTimer/HSRTimer.csproj
+dotnet build src/TwilightTimer/TwilightTimer.csproj
 ```
 
-The output is `src/HSRTimer/bin/Debug/netstandard2.0/HSRTimer.dll`.
+The output is `src/TwilightTimer/bin/Debug/netstandard2.0/TwilightTimer.dll`,
+plus a versioned copy `TwilightTimer-v{version}.dll` for releases.
 
 ## Configuration
 
-All config lives under `<BepInEx config dir>/HSRTimer/`:
+All config lives under `<BepInEx config dir>/TwilightTimer/`:
 
 | File | Contents |
 |------|----------|
@@ -102,8 +125,9 @@ saved when the panel is closed or the game exits. See [docs/CONFIG.md](docs/CONF
 - [Categories & tags](docs/CATEGORIES.md) · [Checkpoint rules](docs/CHECKPOINTS.md)
 - [Configuration](docs/CONFIG.md) · [HUD](docs/HUD.md)
 - [Settings panel](docs/PANEL.md)
-- [Localization](docs/LOCALIZATION.md) · [Extending (custom tags)](docs/EXTENDING.md)
+- [Localization](docs/LOCALIZATION.md) · [Extending (custom tags & settings tabs)](docs/EXTENDING.md)
 - [Voiceline detection](docs/VOICELINE.md)
+- [Testing (in-game console)](docs/TESTS.md)
 
 ## License
 

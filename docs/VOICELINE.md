@@ -3,7 +3,7 @@
 > **中文版**: [zh/VOICELINE.md](zh/VOICELINE.md)
 
 The **Voiceline** tag (R3.6) requires the player to trigger every story
-voiceline in a level. This page explains how HSRTimer detects compliance — it is
+voiceline in a level. This page explains how TwilightTimer detects compliance — it is
 the subtlest tag, because a common skip trick leaves a detectable trace.
 
 ## What the game does
@@ -17,7 +17,7 @@ its private `wasPlayed` flag and never replays.
 There is also a special narrative audio source, conventionally named **"Easter"**,
 that plays a particular story clip.
 
-## How HSRTimer tracks it (`VoicelineTracker`)
+## How TwilightTimer tracks it (`VoicelineTracker`)
 
 1. **On level enter** — scan the scene:
    - `Object.FindObjectsOfType<NarrativeBlock>()` records every block's instance
@@ -31,13 +31,16 @@ that plays a particular story clip.
      pending). Idempotent (deduped by instance id).
    - `SubtitleManager.PlayNarrative(AudioClip)` postfix → if the clip is the
      Easter clip, mark Easter as **played** and flip the run back to satisfied.
+   - The tracker also polls the Easter `AudioSource.isPlaying` each tick, so
+     hidden easter-egg triggers that call `AudioSource.Play()` directly (not
+     through `SubtitleManager.PlayNarrative`) are still counted as played.
 
 3. **On level exit** — the run is **invalid** (reason `Voiceline`) if:
    - the Easter source was present but never played, **or**
    - any `NarrativeBlock` was never triggered.
 
-When all voicelines are satisfied, the HUD shows a green "all voicelines
-triggered" hint (R3.6.3).
+When the Voiceline tag is active, the HUD shows a live progress line in the
+same style as the Checkpoint tag — `Voice: triggered/total` (R3.6.3).
 
 ## Why two signals
 

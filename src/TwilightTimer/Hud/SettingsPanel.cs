@@ -1,0 +1,973 @@
+using System.Collections.Generic;
+using System.IO;
+using UnityEngine;
+
+namespace TwilightTimer
+{
+    /// <summary>
+    /// An IMGUI settings panel, organized into tabbed pages (About, General,
+    /// Interface, Category, Subsegment, Leaderboard, Markers, plus any tabs
+    /// registered by other plugins via <see cref="ISettingsPanelTab"/>). Edits every user-tunable
+    /// option and applies it live (the HUD/engine read from the shared models
+    /// each frame, so changes take effect immediately). Changes are written to
+    /// disk when the panel is closed or the game exits. Toggled by the
+    /// configurable Menu key (default Home). Editing a keybind is done by
+    /// focusing its field and pressing the desired key.
+    /// </summary>
+    public class SettingsPanel : MonoBehaviour
+    {
+        public static SettingsPanel Instance { get; private set; }
+
+        private bool _visible;
+
+        /// <summary>Whether the panel is currently shown on screen.</summary>
+        public bool IsVisible => _visible;
+        private Rect _rect = new Rect(60f, 60f, 640f, 580f);
+
+        // Styles. _toggle (from GUI.skin.toggle) and _button (from GUI.skin.button)
+        // are critical: passing a label-derived style to Toggle/SelectionGrid
+        // makes the checkbox / radio indicator disappear, because the indicator
+        // glyph is the style's background and label has none.
+        private GUIStyle _label, _value, _section, _small, _toggle, _button, _textField;
+        private Font _font;
+        private bool _stylesReady;
+        private Vector2 _scroll;
+
+        // Active tab page. Defaults to General rather than the informational
+        // About page at index 0, preserving the panel's previous landing tab.
+        private const int GeneralTabIndex = 1;
+        private int _tab = GeneralTabIndex;
+        private string[] _tabDisplays;
+        private static readonly string[] _tabKeys = { "PANEL_TAB_ABOUT", "PANEL_TAB_GENERAL", "PANEL_TAB_INTERFACE", "PANEL_TAB_CATEGORY", "PANEL_TAB_SUBSEGMENT", "PANEL_TAB_LEADERBOARD", "PANEL_TAB_MARKERS" };
+
+        // Keybind rebind state: which logical action is awaiting a keypress.
+        private string _pendingRebind;
+
+        // Per-color hex text buffers, keyed by an identity string ("A"/"B").
+        // IMGUI text fields are stateless — we own the string each frame and
+        // reconcile it with the live color so typing hex and dragging the
+        // RGB sliders stay in sync both ways.
+        private readonly Dictionary<string, string> _colorHexBuf = new Dictionary<string, string>();
+
+        // Transient language/code lists.
+        private string[] _langCodes;
+        private string[] _langDisplays;
+        private bool _langDropdownOpen;
+
+        // Transient preset state (R11). The selected preset itself lives in
+        // SettingsModel.CurrentPreset; these fields only back the IMGUI controls.
+        private string[] _presetNames;
+        private bool _presetDropdownOpen;
+        private bool _presetCreating;
+        private string _presetNewName = "";
+        private string _presetErrorKey;
+
+        private void Awake()
+        {
+            Instance = this;
+        }
+
+        private void Update()
+        {
+            // IMGUI does not consistently route side mouse buttons through
+            // OnGUI MouseDown events, so also poll the raw mouse button state
+            // while a rebind is active. This makes Mouse3–Mouse6 bindable even
+            // when the engine only reports them through Input.GetMouseButtonDown.
+            if (!_visible || _pendingRebind == null)
+                return;
+
+            for (int button = 3; button <= 6; button++)
+            {
+                if (InputUtil.IsBindableMouseButton(button)
+                    && Input.GetMouseButtonDown(button))
+                {
+                    KeyCode pressed = InputUtil.MouseKeyCodeForButton(button);
+                    if (pressed != KeyCode.None)
+                    {
+                        ApplyRebind(_pendingRebind, pressed);
+                        _pendingRebind = null;
+                    }
+                    break;
+                }
+            }
+        }
+
+        private void OnDestroy()
+        {
+            // Game exit / plugin unload: persist any unsaved edits.
+            if (ConfigService.Instance != null)
+                ConfigService.Instance.SaveSettings();
+        }
+
+        private void OnApplicationQuit()
+        {
+            if (ConfigService.Instance != null)
+                ConfigService.Instance.SaveSettings();
+        }
+
+        public void Toggle()
+        {
+            _visible = !_visible;
+            if (!_visible && ConfigService.Instance != null)
+                ConfigService.Instance.SaveSettings();
+            if (_visible)
+            {
+                _langDropdownOpen = false;
+                _presetDropdownOpen = false;
+                _presetCreating = false;
+                _presetNewName = "";
+                _presetErrorKey = null;
+                RefreshLanguageList();
+                RefreshPresetList();
+                RefreshTabDisplays();
+            }
+        }
+
+        /// <summary>
+        /// Show or hide the settings panel without toggling if it is already in
+        /// the requested state. Used by the in-game dev console.
+        /// </summary>
+        public void SetVisible(bool visible)
+        {
+            if (_visible == visible)
+                return;
+            Toggle();
+        }
+
+        private void EnsureStyles()
+        {
+            if (_stylesReady) return;
+            try
+            {
+                _font = Font.CreateDynamicFontFromOSFont(new[]
+                {
+                    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+                    "Noto Sans CJK", "Heiti SC", "Arial Unicode MS", "Arial",
+                }, 14);
+            }
+            catch { _font = null; }
+            _label = new GUIStyle(GUI.skin.label) { font = _font, fontSize = 13, wordWrap = false };
+            _value = new GUIStyle(GUI.skin.label) { font = _font, fontSize = 13 };
+            _section = new GUIStyle(GUI.skin.label) { font = _font, fontSize = 14, fontStyle = FontStyle.Bold };
+            _small = new GUIStyle(GUI.skin.label) { font = _font, fontSize = 11, wordWrap = true };
+            // Toggle style carries the checkbox glyph; SelectionGrid/Button carry the
+            // button (radio/selected) background. All get the CJK-capable font.
+            _toggle = new GUIStyle(GUI.skin.toggle) { font = _font, fontSize = 13, wordWrap = false };
+            _button = new GUIStyle(GUI.skin.button) { font = _font, fontSize = 13, wordWrap = false };
+            _textField = new GUIStyle(GUI.skin.textField) { font = _font, fontSize = 13 };
+            _stylesReady = true;
+        }
+
+        private void OnGUI()
+        {
+            if (!_visible) return;
+            EnsureStyles();
+            // T2.2: badge the window title while a match is running (with the
+            // round id when a round is in flight).
+            string title = "TwilightTimer - " + PluginInfo.PLUGIN_VERSION;
+            if (MatchMode.Active)
+            {
+                var cfg0 = ConfigService.Instance;
+                string badge = cfg0 != null ? cfg0.Localization.Get("PANEL_MATCH_BADGE") : "Match";
+                title += " — " + badge;
+                if (RoundTracker.RoundActive && RoundTracker.RoundId != null)
+                    title += " #" + RoundTracker.RoundId;
+            }
+            _rect = GUI.Window(GetInstanceID(), _rect, Draw, title);
+        }
+
+        private void Draw(int id)
+        {
+            var cfg = ConfigService.Instance;
+            if (cfg == null) { return; }
+            var s = cfg.Settings;
+            var loc = cfg.Localization;
+
+            // R9.2: keep language-aware external tabs in sync with the active
+            // language. Cheap: the registry only calls SetLanguage on change.
+            var tabRegistry = SettingsPanelTabRegistry.Instance;
+            if (tabRegistry != null)
+                tabRegistry.NotifyLanguageChanged(loc.CurrentCode);
+
+            // Capture a keypress for an in-progress rebind before any widget
+            // consumes the event. Mouse side buttons arrive as MouseDown
+            // rather than KeyDown, so handle both event types.
+            if (_pendingRebind != null && Event.current.type == EventType.KeyDown)
+            {
+                KeyCode pressed = Event.current.keyCode;
+                // Ignore pure modifier presses so the user can press e.g. "H".
+                if (pressed != KeyCode.LeftShift && pressed != KeyCode.RightShift
+                    && pressed != KeyCode.LeftControl && pressed != KeyCode.RightControl
+                    && pressed != KeyCode.LeftAlt && pressed != KeyCode.RightAlt
+                    && pressed != KeyCode.LeftCommand && pressed != KeyCode.RightCommand)
+                {
+                    ApplyRebind(_pendingRebind, pressed);
+                    _pendingRebind = null;
+                    Event.current.Use();
+                }
+            }
+            else if (_pendingRebind != null && Event.current.type == EventType.MouseDown)
+            {
+                // Keep left/right mouse buttons un-bindable; allow side
+                // buttons (button 3+) for speedrun keybinds.
+                int button = Event.current.button;
+                KeyCode pressed = InputUtil.MouseKeyCodeForButton(button);
+                if (InputUtil.IsBindableMouseButton(button) && pressed != KeyCode.None)
+                {
+                    ApplyRebind(_pendingRebind, pressed);
+                    _pendingRebind = null;
+                    Event.current.Use();
+                }
+            }
+
+            // Left-hand vertical category navigation, kept outside the scroll view.
+            RefreshTabDisplays();
+            if (_tab >= _tabDisplays.Length) _tab = Mathf.Max(0, _tabDisplays.Length - 1);
+            if (_tab < 0) _tab = 0;
+            GUILayout.BeginHorizontal();
+
+            int nextTab = GUILayout.SelectionGrid(_tab, _tabDisplays, 1, _button, GUILayout.Width(120));
+            if (nextTab != _tab) _tab = nextTab;
+            GUILayout.Space(4);
+
+            _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.ExpandWidth(true));
+
+            switch (_tab)
+            {
+                case 0: DrawAbout(loc); break;
+                case 1: DrawGeneral(cfg, s, loc); break;
+                case 2: DrawInterface(cfg, loc); break;
+                case 3: DrawCategory(cfg, loc); break;
+                case 4: DrawSubsegment(cfg, s, loc); break;
+                case 5: DrawLeaderboard(cfg, s, loc); break;
+                case 6: DrawMarkers(cfg, loc); break;
+                default: DrawExternalTab(_tab - _tabKeys.Length); break;
+            }
+
+            GUILayout.Space(8);
+
+            GUILayout.EndScrollView();
+
+            GUILayout.EndHorizontal();
+
+            GUI.DragWindow(new Rect(0, 0, _rect.width, 20));
+        }
+
+        // ── Page: About (R12: plugin name, version, license notice, repository link;
+        //    R13: Check Update) ──
+        private void DrawAbout(LocalizationService loc)
+        {
+            GUILayout.Space(6);
+            // R12.2: top two lines = plugin name + version number.
+            GUILayout.Label(PluginInfo.PLUGIN_NAME, _section);
+            GUILayout.Label(PluginInfo.PLUGIN_VERSION, _value);
+
+            // R12.3: next two lines = the first two non-empty lines of LICENSE
+            // (MIT License / Copyright). Legal text, deliberately not localized.
+            GUILayout.Space(6);
+            GUILayout.Label(PluginInfo.LICENSE_LINE1, _label);
+            GUILayout.Label(PluginInfo.LICENSE_LINE2, _label);
+
+            // R12.4: open the project repository in the system browser.
+            GUILayout.Space(10);
+            if (GUILayout.Button(loc.Get("PANEL_ABOUT_GITHUB"), _button))
+                OpenRepository();
+
+            // R13: Check Update — query GitHub Releases, show the newest release,
+            // and (on request) download + install it.
+            DrawUpdater(loc);
+        }
+
+        // ── R13: plugin update widget on the About page ──
+        private void DrawUpdater(LocalizationService loc)
+        {
+            var updater = UpdaterService.Instance;
+            if (updater == null) return;
+
+            GUILayout.Space(10);
+            bool busy = updater.IsBusy;
+            GUI.enabled = !busy;
+            if (GUILayout.Button(loc.Get("PANEL_ABOUT_CHECK_UPDATE"), _button))
+                updater.CheckForUpdate();
+            GUI.enabled = true;
+
+            switch (updater.Phase)
+            {
+                case UpdatePhase.Checking:
+                    GUILayout.Label(loc.Get("PANEL_ABOUT_CHECKING"), _small);
+                    break;
+                case UpdatePhase.HasUpdate:
+                    DrawPendingUpdate(loc, updater);
+                    break;
+                case UpdatePhase.Downloading:
+                    GUILayout.Label(loc.Get("PANEL_ABOUT_DOWNLOADING", updater.ProgressPercent), _small);
+                    break;
+                case UpdatePhase.RestartRequired:
+                    GUILayout.Label(loc.Get("PANEL_ABOUT_UPDATE_DONE"), _label);
+                    break;
+                default: // Idle
+                    if (!string.IsNullOrEmpty(updater.ErrorText))
+                        GUILayout.Label(loc.Get(
+                            updater.ErrorFromCheck ? "PANEL_ABOUT_UPDATE_ERROR" : "PANEL_ABOUT_DOWNLOAD_ERROR",
+                            updater.ErrorText), _small);
+                    else if (updater.UpToDate)
+                    {
+                        // CheckedVersion holds the raw release tag (e.g. "v1.6.0"), but
+                        // PANEL_ABOUT_UP_TO_DATE already adds the "v" prefix — strip the
+                        // tag's own prefix so it doesn't render as "vv1.6.0".
+                        string checkedVersion = (updater.CheckedVersion ?? string.Empty).TrimStart('v', 'V');
+                        GUILayout.Label(loc.Get("PANEL_ABOUT_UP_TO_DATE", checkedVersion), _small);
+                    }
+                    break;
+            }
+        }
+
+        private void DrawPendingUpdate(LocalizationService loc, UpdaterService updater)
+        {
+            var release = updater.PendingRelease;
+            if (release == null) return;
+            GUILayout.Label(loc.Get("PANEL_ABOUT_UPDATE_AVAILABLE"), _section);
+            string title = !string.IsNullOrEmpty(release.Title) ? release.Title : release.Tag;
+            GUILayout.Label(title, _label);
+            if (!string.IsNullOrEmpty(release.Body))
+            {
+                GUILayout.Label(loc.Get("PANEL_ABOUT_RELEASE_NOTES"), _small);
+                GUILayout.Label(release.Body, _small);
+            }
+            // R13.4: jump to the full release page (release notes shown here are
+            // trimmed to the date + Highlights summary).
+            if (!string.IsNullOrEmpty(release.Url)
+                && GUILayout.Button(loc.Get("PANEL_ABOUT_OPEN_RELEASE"), _button))
+                OpenUrl(release.Url);
+            GUI.enabled = !updater.IsBusy;
+            if (GUILayout.Button(loc.Get("PANEL_ABOUT_UPDATE"), _button))
+                updater.ApplyUpdate();
+            GUI.enabled = true;
+        }
+
+        private static void OpenRepository()
+        {
+            OpenUrl(PluginInfo.PLUGIN_REPOSITORY_URL);
+        }
+
+        /// <summary>Open a URL in the system browser; failures are logged, never thrown (R12.5/R13.4).</summary>
+        private static void OpenUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url))
+                return;
+            try
+            {
+                Application.OpenURL(url);
+            }
+            catch (System.Exception ex)
+            {
+                if (Plugin.Logger != null)
+                    Plugin.Logger.LogWarning($"TwilightTimer: failed to open '{url}': {ex.Message}");
+            }
+        }
+
+        // ── Page: General (timing toggles, language, keybinds) ──
+        private void DrawGeneral(ConfigService cfg, SettingsModel s, LocalizationService loc)
+        {
+            bool locked = MatchMode.Active;
+
+            // Config-source switch: only offered when an upstream HSRTimer config
+            // directory exists to switch to. Locked during a match (T5.3).
+            if (cfg.HsrtimerConfigDirExists)
+            {
+                Section(loc.Get("PANEL_CONFIG_SOURCE"));
+                GUI.enabled = !locked;
+                bool useHsrtimer = cfg.UseHsrtimerConfig;
+                bool nextUseHsrtimer = Toggle(loc.Get("SETTINGS_USE_HSRTIMER_CONFIG"), useHsrtimer);
+                GUI.enabled = true;
+                if (nextUseHsrtimer != useHsrtimer)
+                {
+                    cfg.SetUseHsrtimerConfig(nextUseHsrtimer);
+                    // The whole config (language, layout, presets) was swapped;
+                    // drop every cached UI buffer so it re-reads the new files.
+                    _colorHexBuf.Clear();
+                    _pendingRebind = null;
+                    _presetDropdownOpen = false;
+                    _langDropdownOpen = false;
+                    RefreshLanguageList();
+                    RefreshPresetList();
+                    RefreshTabDisplays();
+                }
+            }
+
+            Section(loc.Get("PANEL_TIMING"));
+            // T2.3: during a match the settings that conflict with the match
+            // rules (T5/T7) are view-only — AutoReset is superseded by the
+            // round tracker (T7.2). Pause always counts and menu/lobby never
+            // counts, so there are no pause/menu count toggles.
+            GUI.enabled = !locked;
+            s.AutoReset = Toggle(loc.Get("SETTINGS_AUTO_RESET"), s.AutoReset);
+            GUI.enabled = true;
+            s.RestartClearsForgivable = Toggle(loc.Get("SETTINGS_RESTART_CLEARS_FORGIVABLE"), s.RestartClearsForgivable);
+            // Free-form input (clamped ≥0 on apply); the slider's 5s cap was
+            // artificial — RetryAction only needs Mathf.Max(0, dwell).
+            s.RetryMinDwell = Mathf.Max(0f, FloatFieldRow(loc.Get("SETTINGS_RETRY_MIN_DWELL"), s.RetryMinDwell, "0.###"));
+
+            // R6.5: optional fixed retry target. The text field only appears while
+            // the option is enabled; disabling clears any pending HUD hint.
+            s.RetryLevelOverrideEnable = Toggle(loc.Get("SETTINGS_RETRY_LEVEL_OVERRIDE_ENABLE"), s.RetryLevelOverrideEnable);
+            if (s.RetryLevelOverrideEnable)
+            {
+                // Compact field: the label (a long "level name or Workshop ID"
+                // description) sits beside it, so a 220px field would push the
+                // row past the scroll view's right edge and spawn a horizontal
+                // scrollbar. Keep it short enough that label + field always fit.
+                s.RetryLevelOverride = TextFieldRow(loc.Get("SETTINGS_RETRY_LEVEL_OVERRIDE"), s.RetryLevelOverride, 130f);
+            }
+            else
+            {
+                s.RetryTargetInvalidHint = false;
+            }
+
+            Section(loc.Get("SETTINGS_LANGUAGE"));
+            DrawLanguageSelector(cfg, loc);
+            if (GUILayout.Button(loc.Get("PANEL_RELOAD_LANGUAGE"), _button))
+            {
+                cfg.ReloadLanguage();
+                var registry = SettingsPanelTabRegistry.Instance;
+                if (registry != null)
+                    registry.NotifyLanguageChanged(cfg.Localization.CurrentCode);
+                RefreshLanguageList();
+                RefreshTabDisplays();
+            }
+
+            Section(loc.Get("SETTINGS_PRESET"));
+            DrawPresetSelector(cfg, loc);
+
+            Section(loc.Get("PANEL_KEYBINDS"));
+            // T7.4/T7.1: the reset and retry keys are disabled in match mode
+            // (rebinding them would be pointless — they log-only during a
+            // round). The menu key stays rebindable.
+            GUI.enabled = !locked;
+            KeybindRow(loc, "SETTINGS_RESET_KEY", () => s.ResetKey, k => s.ResetKey = k);
+            KeybindRow(loc, "SETTINGS_RETRY_KEY", () => s.RetryKey, k => s.RetryKey = k);
+            GUI.enabled = true;
+            KeybindRow(loc, "SETTINGS_MENU_KEY", () => s.MenuKey, k => s.MenuKey = k);
+            KeybindRow(loc, "SETTINGS_LEADERBOARD_KEY", () => s.LeaderboardKey, k => s.LeaderboardKey = k);
+            KeybindRow(loc, "SETTINGS_SUBSEGMENT_TOGGLE_KEY", () => s.SubsegmentToggleKey, k => s.SubsegmentToggleKey = k);
+        }
+
+        // ── Page: Interface (HUD appearance) ──
+        private void DrawInterface(ConfigService cfg, LocalizationService loc)
+        {
+            // (No Validity section: cheat/speed/drift detection is always on with
+            //  hardcoded thresholds — intentionally not user-configurable.)
+            Section(loc.Get("PANEL_HUD"));
+            cfg.Settings.ShowHud = Toggle(loc.Get("SETTINGS_SHOW_HUD"), cfg.Settings.ShowHud);
+            cfg.Settings.ShowLeaderboard = Toggle(loc.Get("SETTINGS_SHOW_LEADERBOARD"), cfg.Settings.ShowLeaderboard);
+            cfg.Settings.ShowRealTime = Toggle(loc.Get("SETTINGS_SHOW_REAL_TIME"), cfg.Settings.ShowRealTime);
+            cfg.Settings.ShowWakeUpTime = Toggle(loc.Get("SETTINGS_SHOW_WAKE_UP_TIME"), cfg.Settings.ShowWakeUpTime);
+            if (cfg.Settings.ShowWakeUpTime)
+                cfg.Settings.OnlyRecordFirstWakeUpTime = Toggle(loc.Get("SETTINGS_ONLY_RECORD_FIRST_WAKE_UP_TIME"), cfg.Settings.OnlyRecordFirstWakeUpTime);
+            cfg.Settings.CenterLoadingSaving = Toggle(loc.Get("SETTINGS_CENTER_LOADING_SAVING"), cfg.Settings.CenterLoadingSaving);
+            cfg.Layout.OffsetX = FloatFieldRow(loc.Get("PANEL_OFFSET_X"), cfg.Layout.OffsetX);
+            cfg.Layout.OffsetY = FloatFieldRow(loc.Get("PANEL_OFFSET_Y"), cfg.Layout.OffsetY);
+            cfg.Layout.FontSize = Mathf.RoundToInt(SliderRow(loc.Get("PANEL_FONT_SIZE"), cfg.Layout.FontSize, 8, 72));
+            ColorRow(loc, "PANEL_COLOR_A", cfg.Layout.ColorA, c => cfg.Layout.ColorA = c);
+            ColorRow(loc, "PANEL_COLOR_B", cfg.Layout.ColorB, c => cfg.Layout.ColorB = c);
+        }
+
+        // ── Page: Category (tag multi-select — no presets) ──
+        private void DrawCategory(ConfigService cfg, LocalizationService loc)
+        {
+            Section(loc.Get("PANEL_TAGS"));
+            DrawTagMultiSelect(cfg, loc);
+        }
+
+        // ── Page: Subsegment (R8) ──
+        private void DrawSubsegment(ConfigService cfg, SettingsModel s, LocalizationService loc)
+        {
+            Section(loc.Get("PANEL_SUBSEGMENT"));
+            // T7.5: the local subsegment module is force-disabled for the whole
+            // match session, so its page is view-only for the duration.
+            bool locked = MatchMode.Active;
+            GUI.enabled = !locked;
+            s.SubsegmentEnable = Toggle(loc.Get("SETTINGS_SUBSEGMENT_ENABLE"), s.SubsegmentEnable);
+            s.SubsegmentDebugLogging = Toggle(loc.Get("SETTINGS_SUBSEGMENT_DEBUG_LOGGING"), s.SubsegmentDebugLogging);
+
+            s.SubsegmentPBPath = TextFieldRow(loc.Get("SETTINGS_SUBSEGMENT_PB_PATH"), s.SubsegmentPBPath);
+            s.SubsegmentLoadPath = TextFieldRow(loc.Get("SETTINGS_SUBSEGMENT_LOAD_PATH"), s.SubsegmentLoadPath);
+
+            Section(loc.Get("SETTINGS_SUBSEGMENT_MULTI_PROJECT"));
+            string[] projects = { "Aztec%", "Dark%", "Steam%", "Any%" };
+            int idx = System.Array.IndexOf(projects, s.SubsegmentMultiProject);
+            if (idx < 0) idx = 3;
+            int next = GUILayout.SelectionGrid(idx, projects, 2, _button);
+            if (next != idx) s.SubsegmentMultiProject = projects[next];
+
+            Section(loc.Get("SETTINGS_SUBSEGMENT_DETAILS"));
+            s.SubsegmentPlaneRadius = Mathf.Max(0f, FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_PLANE_RADIUS"), s.SubsegmentPlaneRadius, "0.###"));
+            s.SubsegmentMinMove = Mathf.Max(0f, FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_MIN_MOVE"), s.SubsegmentMinMove, "0.###"));
+            s.SubsegmentSampleInterval = Mathf.Max(0.01f, FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_SAMPLE_INTERVAL"), s.SubsegmentSampleInterval, "0.###"));
+            s.SubsegmentQuietSettleSeconds = Mathf.Max(0f, FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_QUIET_SETTLE_SECONDS"), s.SubsegmentQuietSettleSeconds, "0.###"));
+            s.SubsegmentPlaneDebounceSeconds = Mathf.Max(0f, FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_PLANE_DEBOUNCE_SECONDS"), s.SubsegmentPlaneDebounceSeconds, "0.###"));
+            s.SubsegmentRespawnJumpMeters = Mathf.Max(0f, FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_RESPAWN_JUMP_METERS"), s.SubsegmentRespawnJumpMeters, "0.###"));
+            s.SubsegmentMaxSamplesPerLevel = Mathf.Max(1, Mathf.RoundToInt(FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_MAX_SAMPLES_PER_LEVEL"), s.SubsegmentMaxSamplesPerLevel, "F0")));
+            s.SubsegmentMaxLeaderboardEntries = Mathf.Max(1, Mathf.RoundToInt(FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_MAX_LEADERBOARD_ENTRIES"), s.SubsegmentMaxLeaderboardEntries, "F0")));
+            GUI.enabled = true;
+            if (locked)
+                GUILayout.Label(loc.Get("PANEL_MATCH_SUBSEGMENT_LOCKED"), _small);
+        }
+
+        // ── Page: Leaderboard (R8.5 HUD appearance + entry state colors + content mode) ──
+        private void DrawLeaderboard(ConfigService cfg, SettingsModel s, LocalizationService loc)
+        {
+            var layout = cfg.Layout;
+            Section(loc.Get("PANEL_LEADERBOARD"));
+
+            // R10.7.1: the shared leaderboard shows either the subsegment
+            // references or the current level's marker feed.
+            Section(loc.Get("SETTINGS_LEADERBOARD_MODE"));
+            string[] modes = { loc.Get("SETTINGS_LEADERBOARD_MODE_SUBSEGMENT"), loc.Get("SETTINGS_LEADERBOARD_MODE_MARKERS") };
+            int mi = string.Equals(layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            int nextMode = GUILayout.SelectionGrid(mi, modes, 2, _button);
+            if (nextMode != mi)
+                layout.LeaderboardMode = nextMode == 1 ? "Markers" : "Subsegment";
+            bool markersMode = string.Equals(layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase);
+
+            Section(loc.Get("PANEL_HUD"));
+            layout.LeaderboardFontSize = Mathf.Clamp(Mathf.RoundToInt(SliderRow(loc.Get("SETTINGS_SUBSEGMENT_HUD_FONT_SIZE"), layout.LeaderboardFontSize, 8, 72)), 8, 72);
+            layout.LeaderboardOffsetX = FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_HUD_OFFSET_X"), layout.LeaderboardOffsetX, "0.##");
+            layout.LeaderboardOffsetY = FloatFieldRow(loc.Get("SETTINGS_SUBSEGMENT_HUD_OFFSET_Y"), layout.LeaderboardOffsetY, "0.##");
+
+            Section(loc.Get("SETTINGS_LEADERBOARD_COLORS"));
+            ColorRow(loc, "SETTINGS_LEADERBOARD_COLOR_FASTER", layout.LeaderboardColorFaster, c => layout.LeaderboardColorFaster = c);
+            ColorRow(loc, "SETTINGS_LEADERBOARD_COLOR_SLOWER", layout.LeaderboardColorSlower, c => layout.LeaderboardColorSlower = c);
+            ColorRow(loc, "SETTINGS_LEADERBOARD_COLOR_TIE", layout.LeaderboardColorTie, c => layout.LeaderboardColorTie = c);
+
+            if (markersMode)
+            {
+                // R10.7.3: marker feed time display (absolute segment time or
+                // signed diff vs PB); the entry colors above apply to both.
+                Section(loc.Get("SETTINGS_MARKERS_TIME_MODE"));
+                string[] timeModes = { loc.Get("SETTINGS_MARKERS_TIME_MODE_RELATIVE"), loc.Get("SETTINGS_MARKERS_TIME_MODE_ABSOLUTE") };
+                int ti = string.Equals(layout.LeaderboardMarkersTimeMode, "Absolute", System.StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                int nextTime = GUILayout.SelectionGrid(ti, timeModes, 2, _button);
+                if (nextTime != ti)
+                    layout.LeaderboardMarkersTimeMode = nextTime == 1 ? "Absolute" : "Relative";
+                GUILayout.Label(loc.Get("SETTINGS_LEADERBOARD_MARKERS_NOTE"), _small);
+            }
+            else
+            {
+                Section(loc.Get("SETTINGS_LEADERBOARD_SOURCES"));
+                DrawSubsegmentSources(cfg, s, loc);
+            }
+        }
+
+        // ── subsegment source visibility toggles (subsegment leaderboard mode only) ──
+        private void DrawSubsegmentSources(ConfigService cfg, SettingsModel s, LocalizationService loc)
+        {
+            bool pbEnabled = s.IsSubsegmentSourceEnabled("PB");
+            bool pbNext = Toggle(loc.Get("SETTINGS_LEADERBOARD_SOURCE_PB"), pbEnabled);
+            if (pbNext != pbEnabled) s.SetSubsegmentSourceEnabled("PB", pbNext);
+
+            string loadDir = SubsegmentFileStore.ResolvePath(
+                string.IsNullOrEmpty(s.SubsegmentLoadPath) ? "subsegment/load" : s.SubsegmentLoadPath);
+            if (!string.IsNullOrEmpty(loadDir) && Directory.Exists(loadDir))
+            {
+                try
+                {
+                    var dirs = Directory.GetDirectories(loadDir);
+                    System.Array.Sort(dirs, System.StringComparer.Ordinal);
+                    foreach (var dir in dirs)
+                    {
+                        string id = Path.GetFileName(dir);
+                        if (string.IsNullOrEmpty(id)) continue;
+                        bool enabled = s.IsSubsegmentSourceEnabled(id);
+                        bool next = Toggle(id, enabled);
+                        if (next != enabled) s.SetSubsegmentSourceEnabled(id, next);
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Plugin.Logger.LogWarning($"TwilightTimer: failed to list subsegment load directory '{loadDir}': {ex.Message}");
+                    GUILayout.Label(loc.Get("SETTINGS_LEADERBOARD_NO_LOAD_DIR"), _small);
+                }
+            }
+            else if (!string.IsNullOrEmpty(loadDir))
+            {
+                GUILayout.Label(loc.Get("SETTINGS_LEADERBOARD_NO_LOAD_DIR"), _small);
+            }
+        }
+
+        // ── Page: Markers (R10) ──
+        private void DrawMarkers(ConfigService cfg, LocalizationService loc)
+        {
+            MarkersPanel.Draw(cfg, loc, _section, _label, _value, _small, _toggle, _button, _textField);
+        }
+
+        // ── Page: external plugin tab (ISettingsPanelTab) ──
+        private void DrawExternalTab(int index)
+        {
+            var registry = SettingsPanelTabRegistry.Instance;
+            if (registry == null) return;
+            int i = 0;
+            foreach (var tab in registry.Tabs)
+            {
+                if (i == index)
+                {
+                    tab.Draw();
+                    return;
+                }
+                i++;
+            }
+        }
+
+        // ── widgets ──
+
+        private void Section(string title)
+        {
+            GUILayout.Space(6);
+            GUILayout.Label(title, _section);
+        }
+
+        // Uses the _toggle style so the checkbox glyph renders.
+        private bool Toggle(string label, bool value)
+        {
+            return GUILayout.Toggle(value, label, _toggle);
+        }
+
+        private float SliderRow(string label, float value, float min, float max)
+        {
+            GUILayout.Label(label + ": " + value.ToString("0.##"), _value);
+            return GUILayout.HorizontalSlider(value, min, max);
+        }
+
+        private float FloatFieldRow(string label, float value, string format = "F0")
+        {
+            GUILayout.BeginHorizontal();
+            string newText = GUILayout.TextField(value.ToString(format), _textField, GUILayout.Width(70));
+            GUILayout.Label(label, _label);
+            GUILayout.EndHorizontal();
+            float parsed;
+            if (float.TryParse(newText, out parsed)) return parsed;
+            return value;
+        }
+
+        private string TextFieldRow(string label, string value, float width = 220f)
+        {
+            GUILayout.BeginHorizontal();
+            string newText = GUILayout.TextField(value, _textField, GUILayout.Width(width));
+            GUILayout.Label(label, _label);
+            GUILayout.EndHorizontal();
+            return newText;
+        }
+
+        private void ColorRow(LocalizationService loc, string key, Color c, System.Action<Color> set)
+        {
+            // Two editors, one color:
+            //  - Sliders are the source of truth for the box: whenever a slider
+            //    moves we set() the color AND overwrite the buffer, so the box
+            //    always reflects the current color (even if it held garbage).
+            //  - The box is the source of truth only while the user is typing
+            //    into it: it can hold a half-typed/invalid string, and we set()
+            //    the color only once it parses.
+            // Because each branch keys off "did THIS control change", they can't
+            // fight: a slider move drives the box, typing drives the sliders.
+
+            // ── Hex input ──
+            GUILayout.BeginHorizontal();
+            if (!_colorHexBuf.TryGetValue(key, out string buf))
+                buf = GradientText.ToHex(c);
+            string newText = GUILayout.TextField(buf, _textField, GUILayout.Width(90));
+            _colorHexBuf[key] = newText;
+            // Typing drives the color only when the text parses.
+            if (newText != buf && GradientText.TryParseColor(newText, out Color fromText))
+                set(fromText);
+            GUILayout.Label(loc.Get(key), _label);
+            GUILayout.Label(loc.Get("PANEL_COLOR_HEX"), _label);
+            GUILayout.EndHorizontal();
+
+            // ── RGB sliders ──
+            GUILayout.BeginHorizontal();
+            float r = LabeledSlider("R", c.r); GUILayout.Space(4);
+            float g = LabeledSlider("G", c.g); GUILayout.Space(4);
+            float b = LabeledSlider("B", c.b); GUILayout.Space(4);
+            float a = LabeledSlider("A", c.a);
+            GUILayout.EndHorizontal();
+            // A slider move is the authority: push the color into the box too.
+            if (r != c.r || g != c.g || b != c.b || a != c.a)
+            {
+                Color next = new Color(r, g, b, a);
+                set(next);
+                _colorHexBuf[key] = GradientText.ToHex(next);
+            }
+        }
+
+        private float LabeledSlider(string label, float value)
+        {
+            GUILayout.Label(label, GUILayout.Width(14));
+            return GUILayout.HorizontalSlider(value, 0f, 1f, GUILayout.Width(70));
+        }
+
+        private void KeybindRow(LocalizationService loc, string key,
+            System.Func<KeyCode> get, System.Action<KeyCode> set)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(loc.Get(key), _label, GUILayout.Width(200));
+            bool pending = _pendingRebind == key;
+            string btn = pending ? loc.Get("PANEL_PRESS_KEY") : get().ToString();
+            if (GUILayout.Button(btn, _button, GUILayout.Width(140)))
+                _pendingRebind = pending ? null : key;
+            GUILayout.EndHorizontal();
+        }
+
+        private void ApplyRebind(string key, KeyCode pressed)
+        {
+            // Left/right mouse buttons stay reserved for normal UI use; do not
+            // let them become keybinds even if some event path reports them.
+            if (pressed == KeyCode.Mouse0 || pressed == KeyCode.Mouse1)
+                return;
+
+            var s = ConfigService.Instance.Settings;
+            if (key == "SETTINGS_RESET_KEY") s.ResetKey = pressed;
+            else if (key == "SETTINGS_RETRY_KEY") s.RetryKey = pressed;
+            else if (key == "SETTINGS_MENU_KEY") s.MenuKey = pressed;
+            else if (key == "SETTINGS_LEADERBOARD_KEY") s.LeaderboardKey = pressed;
+            else if (key == "SETTINGS_SUBSEGMENT_TOGGLE_KEY") s.SubsegmentToggleKey = pressed;
+        }
+
+        // Multi-select of rule tags. There are no category presets — every
+        // registered tag rule (built-in + any custom) is listed as a checkbox;
+        // toggling adds/removes the tag from the enabled set, live. During a
+        // match the pushed round tags are the sole authority (T5.3): the list
+        // still shows what is in effect (T5.6) but cannot be edited (T2.3).
+        private void DrawTagMultiSelect(ConfigService cfg, LocalizationService loc)
+        {
+            var tags = cfg.EnabledTags;
+            if (tags == null || TagRuleRegistry.Instance == null)
+            {
+                GUILayout.Label(loc.Get("PANEL_NO_TAGS"), _small);
+                return;
+            }
+
+            bool locked = MatchMode.Active;
+            GUI.enabled = !locked;
+            foreach (var rule in TagRuleRegistry.Instance.All)
+            {
+                bool on = tags.HasTag(rule.Id);
+                string display = string.IsNullOrEmpty(rule.DisplayNameKey)
+                    ? rule.Id : loc.Get(rule.DisplayNameKey);
+                bool next = GUILayout.Toggle(on, display + "  [" + rule.Id + "]", _toggle);
+                if (!locked && next != on)
+                {
+                    if (next) tags.Enable(rule.Id);
+                    else tags.Disable(rule.Id);
+                }
+            }
+            GUI.enabled = true;
+            if (locked)
+                GUILayout.Label(loc.Get("PANEL_MATCH_TAGS_LOCKED"), _small);
+        }
+
+        // Single-select language picker shown as a dropdown. The displayed names
+        // come directly from each language file's __LANG_NAME__ entry; the code
+        // is not appended, so the picker shows exactly what translators defined.
+        // Unity's IMGUI version in this game has no GUILayout.Popup, so the
+        // dropdown is built from a button plus a collapsible list of buttons.
+        private void DrawLanguageSelector(ConfigService cfg, LocalizationService loc)
+        {
+            if (_langCodes == null) RefreshLanguageList();
+            if (_langCodes == null || _langCodes.Length == 0) return;
+
+            int current = System.Array.IndexOf(_langCodes, cfg.Localization.CurrentCode);
+            if (current < 0) current = 0;
+
+            string selected = (_langDropdownOpen ? "▾ " : "▸ ") + _langDisplays[current] + "  " + loc.Get("PANEL_LANG_SELECT_HINT");
+            if (GUILayout.Button(selected, _button))
+                _langDropdownOpen = !_langDropdownOpen;
+
+            if (_langDropdownOpen)
+            {
+                for (int i = 0; i < _langDisplays.Length; i++)
+                {
+                    string item = i == current ? "✓  " + _langDisplays[i] : _langDisplays[i];
+                    if (GUILayout.Button(item, _button))
+                    {
+                        if (i != current)
+                        {
+                            cfg.Localization.SetLanguage(_langCodes[i]);
+                            cfg.Settings.CurrentLang = cfg.Localization.CurrentCode;
+                            var registry = SettingsPanelTabRegistry.Instance;
+                            if (registry != null)
+                                registry.NotifyLanguageChanged(cfg.Localization.CurrentCode);
+                            RefreshTabDisplays();
+                        }
+                        _langDropdownOpen = false;
+                    }
+                }
+            }
+        }
+
+        // Single-select preset picker (R11). Mirrors the language dropdown:
+        // a button + collapsible list, with "New preset" at the bottom. The
+        // selection is a real config item (SettingsModel.CurrentPreset) and is
+        // persisted via the normal SaveSettings path.
+        private void DrawPresetSelector(ConfigService cfg, LocalizationService loc)
+        {
+            if (_presetNames == null) RefreshPresetList();
+            var s = cfg.Settings;
+            if (_presetNames == null) return;
+
+            string current = s.CurrentPreset;
+            if (!PresetStore.Exists(current))
+                current = PresetStore.DefaultPresetName;
+
+            string selected = (_presetDropdownOpen ? "▾ " : "▸ ") + current + "  " + loc.Get("SETTINGS_PRESET_SELECT_HINT");
+            if (GUILayout.Button(selected, _button))
+                _presetDropdownOpen = !_presetDropdownOpen;
+
+            if (_presetDropdownOpen)
+            {
+                foreach (var name in _presetNames)
+                {
+                    if (string.IsNullOrEmpty(name)) continue;
+                    string item = string.Equals(name, s.CurrentPreset, System.StringComparison.Ordinal) ? "✓  " + name : name;
+                    if (GUILayout.Button(item, _button))
+                    {
+                        if (!string.Equals(name, s.CurrentPreset, System.StringComparison.Ordinal))
+                        {
+                            s.CurrentPreset = name;
+                            cfg.SaveSettings();
+                            _presetErrorKey = null;
+                            _presetCreating = false;
+                        }
+                        _presetDropdownOpen = false;
+                    }
+                }
+
+                // New-preset input row appears directly above the New preset button,
+                // below all existing preset options.
+                if (_presetCreating)
+                {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label(loc.Get("SETTINGS_PRESET_NEW_NAME"), _label);
+                    _presetNewName = GUILayout.TextField(_presetNewName, _textField, GUILayout.Width(160));
+                    if (GUILayout.Button(loc.Get("SETTINGS_PRESET_CONFIRM"), _button, GUILayout.Width(80)))
+                        ConfirmNewPreset(cfg);
+                    if (GUILayout.Button(loc.Get("SETTINGS_PRESET_CANCEL"), _button, GUILayout.Width(80)))
+                    {
+                        _presetCreating = false;
+                        _presetNewName = "";
+                        _presetErrorKey = null;
+                    }
+                    GUILayout.EndHorizontal();
+                    if (_presetErrorKey != null)
+                        GUILayout.Label(loc.Get(_presetErrorKey), _small);
+                }
+
+                if (GUILayout.Button(loc.Get("SETTINGS_PRESET_NEW"), _button))
+                {
+                    _presetCreating = !_presetCreating;
+                    _presetNewName = "";
+                    _presetErrorKey = null;
+                }
+            }
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(loc.Get("SETTINGS_PRESET_LOAD"), _button))
+            {
+                if (PresetStore.LoadCurrent(cfg))
+                    _presetErrorKey = null;
+                else
+                    _presetErrorKey = "SETTINGS_PRESET_LOAD_FAILED";
+            }
+            if (GUILayout.Button(loc.Get("SETTINGS_PRESET_SAVE"), _button))
+            {
+                if (PresetStore.SaveToCurrent(cfg))
+                    _presetErrorKey = null;
+                else
+                    _presetErrorKey = "SETTINGS_PRESET_SAVE_FAILED";
+            }
+            GUILayout.EndHorizontal();
+
+            bool isDefault = string.Equals(s.CurrentPreset, PresetStore.DefaultPresetName, System.StringComparison.OrdinalIgnoreCase);
+            if (!isDefault)
+            {
+                if (GUILayout.Button(loc.Get("SETTINGS_PRESET_DELETE"), _button))
+                {
+                    if (PresetStore.DeleteCurrent(cfg))
+                    {
+                        RefreshPresetList();
+                        _presetDropdownOpen = false;
+                        _presetCreating = false;
+                        _presetErrorKey = null;
+                    }
+                    else
+                    {
+                        _presetErrorKey = "SETTINGS_PRESET_DELETE_FAILED";
+                    }
+                }
+            }
+
+            if (_presetErrorKey != null)
+                GUILayout.Label(loc.Get(_presetErrorKey), _small);
+        }
+
+        private void ConfirmNewPreset(ConfigService cfg)
+        {
+            string errorKey;
+            if (PresetStore.TryCreate(_presetNewName, cfg, out errorKey))
+            {
+                RefreshPresetList();
+                _presetCreating = false;
+                _presetNewName = "";
+                _presetErrorKey = null;
+                // Keep the dropdown open so the new option is visible immediately.
+                _presetDropdownOpen = true;
+            }
+            else
+            {
+                _presetErrorKey = errorKey;
+            }
+        }
+
+        private void RefreshPresetList()
+        {
+            var cfg = ConfigService.Instance;
+            if (cfg == null) return;
+            _presetNames = PresetStore.ListPresets();
+            if (System.Array.IndexOf(_presetNames, cfg.Settings.CurrentPreset) < 0)
+                cfg.Settings.CurrentPreset = PresetStore.DefaultPresetName;
+        }
+
+        private void RefreshLanguageList()
+        {
+            var cfg = ConfigService.Instance;
+            if (cfg == null) return;
+            var codes = new List<string>();
+            var displays = new List<string>();
+            foreach (var lang in cfg.Localization.Languages)
+            {
+                codes.Add(lang.Code);
+                displays.Add(lang.DisplayName ?? lang.Code);
+            }
+            _langCodes = codes.ToArray();
+            _langDisplays = displays.ToArray();
+        }
+
+        private void RefreshTabDisplays()
+        {
+            var cfg = ConfigService.Instance;
+            if (cfg == null) return;
+            var registry = SettingsPanelTabRegistry.Instance;
+            int count = _tabKeys.Length + (registry == null ? 0 : registry.Count);
+            if (_tabDisplays == null || _tabDisplays.Length != count)
+                _tabDisplays = new string[count];
+            for (int i = 0; i < _tabKeys.Length; i++)
+                _tabDisplays[i] = cfg.Localization.Get(_tabKeys[i]);
+            if (registry == null) return;
+            int ext = _tabKeys.Length;
+            foreach (var tab in registry.Tabs)
+            {
+                string title = tab.Title;
+                _tabDisplays[ext++] = string.IsNullOrEmpty(title) ? tab.GetType().Name : title;
+            }
+        }
+    }
+}
