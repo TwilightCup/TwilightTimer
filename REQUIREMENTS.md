@@ -553,7 +553,7 @@
   "category_key": "Any",
   "total_ms": 184320,
   "sample_count": 123,
-  "twilighttimer_version": "0.0.0",
+  "twilighttimer_version": "0.0.0.0",
   "created_at": "2026-09-02T12:00:00Z"
 }
 ```
@@ -569,7 +569,7 @@
   "level_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "total_ms": 420000,
   "sample_count": 512,
-  "twilighttimer_version": "0.0.0",
+  "twilighttimer_version": "0.0.0.0",
   "created_at": "2026-09-02T12:00:00Z"
 }
 ```

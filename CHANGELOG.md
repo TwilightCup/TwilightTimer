@@ -2,7 +2,7 @@
 
 This file contains user-facing release notes for TwilightTimer. Only changes that plugin users can observe belong here.
 
-## 0.0.0
+## 0.0.0.0
 
 - **Release Date:** Unreleased
 - **Highlights:** _To be filled during version branch preparation._

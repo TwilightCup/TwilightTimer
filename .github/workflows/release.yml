@@ -76,8 +76,8 @@ jobs:
             exit 1
           fi
 
-          # main 分支上不应再出现 dev 占位版本（0.0.0）。
-          if [ "$VERSION" = "0.0.0" ] || [ "$VERSION" = "dev" ]; then
+          # main 分支上不应再出现 dev 占位版本（0.0.0.0）。
+          if [ "$VERSION" = "0.0.0.0" ] || [ "$VERSION" = "dev" ]; then
             echo "::error::Refusing to release a non-release version ($VERSION) from main"
             exit 1
           fi
