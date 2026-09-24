@@ -1,6 +1,6 @@
 # TESTS(测试文档)
 
-> **English (source of truth)**: [../TESTS.md](../TESTS.md)
+> **English (source of truth)**: [TESTS.md](TESTS.md)
 
 本文说明如何**在游戏内**通过自带的开发者控制台(默认按键 **`~`** 或 **F1**)测试 TwilightTimer 的每一个功能。
 
@@ -49,6 +49,8 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 | `twitimer config [path\|files\|source [status\|hsrtimer\|twilighttimer\|toggle]]` | 打印 TwilightTimer 配置路径,或切换配置来源目录 |
 | `twitimer match [status\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|segments\|leaderboard\|penalty]` | 通过 `TwilightTimerApi`(同步调试面)驱动黄昏杯比赛模式 / 回合生命周期 |
 | `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|events ...]` | 驱动已注册的 `ITimerProvider` 适配器,并把其对外事件镜像到日志 |
+| `twitimer about` | 打印插件名称、版本、许可证声明与仓库 URL(R12) |
+| `twitimer update [status\|check\|apply\|cancel\|base [url]]` | 从 GitHub releases 检测 / 安装插件更新(R13) |
 
 ## `twitimer get` / `twitimer set` 可接受的键
 
@@ -143,6 +145,12 @@ twitimer reload
 ```
 
 `twitimer panel open` 应弹出与 Home 键相同的 IMGUI 设置面板。
+**关于** 标签页是面板导航的第一项;它显示插件名称、版本、MIT 许可证的前两行、一个 **GitHub 仓库** 按钮,以及一个 **检查更新** 按钮(R13);发现新版本时会显示发布标题、其日期 + Highlights 摘要,以及 **打开 Release 页面** / **更新** 按钮。`twitimer about` 打印相同的身份 / 许可证 / 仓库文本,因此无需截图即可核对:
+
+```text
+twitimer panel open
+twitimer about
+```
 
 ### 6. 预设(R11)
 
@@ -260,7 +268,35 @@ twitimer config source twilighttimer
 
 `twitimer status` 也会在末尾的 `configDir=` 行报告 `source=TwilightTimer|HSRTimer`。开关本身存放在 `config/TwilightTimer/config_dir.ini`(`[config] use_hsrtimer`)。
 
-### 13. 黄昏杯比赛模式 / 回合生命周期(T2–T5)
+### 13. 更新检查(R13)
+
+关于标签页的 **检查更新** 流程可以从控制台端到端测试(结果写入 BepInEx 日志,`twitimer-cmd.sh` 可直接读取):
+
+```text
+twitimer update status                        # 阶段 / 仓库基地址 / feed / 上次检测的版本 tag
+twitimer update check                         # 读取 github.com/{owner}/{repo}/releases.atom
+twitimer update status                        # 阶段应变 HasUpdate(或已最新 / 出错)
+twitimer update apply                         # 下载并安装发布 DLL
+twitimer update status                        # 阶段应变 RestartRequired
+```
+
+无网络时,可把检测指向本地 HTTP 服务器来分别走通成功与失败分支:
+
+```text
+twitimer update base http://127.0.0.1:PORT/repo   # 仅本次会话的仓库基地址覆盖
+twitimer update check                              # feed 地址 = <base>/releases.atom
+twitimer update apply                              # 下载地址 = <base>/releases/download/<tag>/TwilightTimer-v<ver>.dll
+twitimer update base clear                         # 恢复真实仓库基地址
+```
+
+说明:
+
+- feed 必须是 GitHub Atom XML(`<feed>` 内含 `<entry>`;每个 entry 的 alternate 链接以 `/releases/tag/{tag}` 结尾,含 `<title>` 与可选的 `<content type="html">`)。取最新**非预发布** entry。
+- 真实 apply 测试时,在推导出的下载路径下提供一个有效的 .NET 程序集(例如 `TwilightTimer-v0.0.0.0.dll` 的副本)——安装器会拒绝零字节 / 无效下载,因此非程序集文件可用来走「无效插件 DLL」错误分支;完全不提供文件则可走「发布资产未找到」(404)分支。
+- apply 成功后,在磁盘上核对 `BepInEx/plugins/` 中出现 `TwilightTimer-v{新版本}.dll` 且不再有旧 `TwilightTimer-v*.dll`(无法删除者变为 `TwilightTimer-v*.dll.dis`,下次启动清理)。
+- `twitimer update cancel` 中止进行中的检测 / 下载。
+
+### 14. 黄昏杯比赛模式 / 回合生命周期(T2–T5)
 
 `twitimer match` 直接、同步地驱动 `TwilightTimerApi` 调试面,适合在不经过
 TwilightCore 的情况下检查生命周期与数据保留。
@@ -291,7 +327,7 @@ twitimer match exit
   分段 / 累计时间。
 - `twitimer match exit` 恢复赛前的用户标签集,但不会清空回合数据。
 
-### 14. `ITimerProvider` 适配器 / 事件总线(T1、T4)
+### 15. `ITimerProvider` 适配器 / 事件总线(T1、T4)
 
 `twitimer sim` 测试实际注册到 TwilightCore `TimerProviderRegistry` 的适配器。变更
 调用会经 `MainThreadQueue` 排队,因此请先用 `twitimer sim drain`(或等待一帧)再检查结果。
@@ -320,7 +356,7 @@ twitimer sim events off
 - `twitimer sim start/resume/stop/tags` 调用接口方法;`twitimer sim drain` 立即执行排队中的
   主线程动作。
 
-### 15. 共享排行榜挂在比赛排行榜下方（T7.6）
+### 16. 共享排行榜挂在比赛排行榜下方（T7.6）
 
 比赛对局期间,共享排行榜(subsegment/markers HUD)必须仅在对局排行榜显示时显示、直接挂在
 其下方,并忽略自身的切换键。`twitimer leaderboard status` 会报告解析后的状态
@@ -377,3 +413,5 @@ twitimer match exit
 - [ ] `twitimer match segments` 在 `twitimer match stop` 后仍保留已完成回合数据。
 - [ ] `twitimer sim status` 报告已注册 provider 及其实时查询结果。
 - [ ] `twitimer sim events on` 输出预期的 T4 对外事件序列。
+- [ ] 关于标签页(导航第一项)显示名称 / 版本 / 许可证与仓库按钮;`twitimer about` 与之匹配。
+- [ ] `twitimer update check` 报告已最新 / 显示更新版本 / 离线时显示一行错误,`twitimer update apply` 安装 DLL(R13)。

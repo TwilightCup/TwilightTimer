@@ -122,6 +122,8 @@ namespace TwilightTimer
                     case "config": CmdConfig(rest); break;
                     case "match": CmdMatch(rest); break;
                     case "sim": CmdSim(rest); break;
+                    case "update": CmdUpdate(rest); break;
+                    case "about": CmdAbout(); break;
                     default:
                         Print($"Unknown TwilightTimer command: {cmd}. Type 'twitimer help' for usage.");
                         break;
@@ -406,6 +408,22 @@ namespace TwilightTimer
         }
 
         // ── hud / panel / leaderboard ──────────────────────────────────────
+
+        /// <summary>
+        /// R12.6: print the same identity/license/repository content the
+        /// settings panel's About page shows, so the page's static text can be
+        /// verified from the console (the link button itself opens the system
+        /// browser).
+        /// </summary>
+        private static void CmdAbout()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(PluginInfo.PLUGIN_NAME + " " + PluginInfo.PLUGIN_VERSION);
+            sb.AppendLine(PluginInfo.LICENSE_LINE1);
+            sb.AppendLine(PluginInfo.LICENSE_LINE2);
+            sb.AppendLine(PluginInfo.PLUGIN_REPOSITORY_URL);
+            Print(sb.ToString());
+        }
 
         private static void CmdHud(List<string> args)
         {
@@ -1518,6 +1536,65 @@ namespace TwilightTimer
             }
         }
 
+        // ── update checker (R13) ─────────────────────────────────────────────
+
+        /// <summary>
+        /// R13.9: exercise the About page's update flow from the console. The
+        /// check/download run asynchronously and log their result to the BepInEx
+        /// log (headless read path); this command only kicks them off / prints state.
+        /// </summary>
+        private static void CmdUpdate(List<string> args)
+        {
+            var updater = UpdaterService.Instance;
+            if (updater == null) { Print("UpdaterService is not ready."); return; }
+            if (args.Count == 0) { Print("Usage: twitimer update [status|check|apply|cancel|base [url]]"); return; }
+
+            string action = args[0].ToLowerInvariant();
+            switch (action)
+            {
+                case "status":
+                    var sb = new StringBuilder();
+                    sb.AppendLine($"phase={updater.Phase} busy={updater.IsBusy}");
+                    sb.AppendLine($"base={updater.RepoBase} feed={updater.FeedUrl}");
+                    sb.AppendLine($"upToDate={updater.UpToDate} checked={updater.CheckedVersion ?? "-"} installed={updater.InstalledVersion ?? "-"}");
+                    if (updater.PendingRelease != null)
+                    {
+                        sb.AppendLine($"pending={updater.PendingRelease.Tag} \"{updater.PendingRelease.Title}\"");
+                        sb.AppendLine($"releaseUrl={updater.PendingRelease.Url ?? "-"}");
+                    }
+                    if (!string.IsNullOrEmpty(updater.ErrorText))
+                        sb.AppendLine($"error={updater.ErrorText}");
+                    Print(sb.ToString());
+                    break;
+                case "check":
+                    updater.CheckForUpdate();
+                    Print("Update check started; result is logged to the BepInEx log.");
+                    break;
+                case "apply":
+                    updater.ApplyUpdate();
+                    Print("Update apply started; result is logged to the BepInEx log.");
+                    break;
+                case "cancel":
+                    updater.Cancel();
+                    Print("Update operation cancelled.");
+                    break;
+                case "base":
+                case "endpoint": // legacy alias
+                    if (args.Count >= 2)
+                    {
+                        string url = string.Join(" ", args.GetRange(1, args.Count - 1));
+                        if (string.Equals(url, "clear", StringComparison.OrdinalIgnoreCase))
+                            url = "";
+                        updater.SetRepoBaseOverride(url);
+                    }
+                    Print("update repo base = " + updater.RepoBase + (updater.RepoBaseOverride != null ? " (session override)" : ""));
+                    break;
+                default:
+                    Print("Usage: twitimer update [status|check|apply|cancel|base [url]]");
+                    break;
+            }
+        }
+
         private static void CmdMatchStatus()
         {
             var sb = new StringBuilder();
@@ -2171,6 +2248,7 @@ namespace TwilightTimer
             sb.AppendLine("  twitimer lc [status|restart] | twitimer config [path|files|source ...]");
             sb.AppendLine("  twitimer match [status|enter|exit|start ...|resume ...|stop|tags ...|segments|leaderboard|penalty]");
             sb.AppendLine("  twitimer sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events ...]");
+            sb.AppendLine("  twitimer update [status|check|apply|cancel|base [url]] | twitimer about");
             Print(sb.ToString());
         }
 
@@ -2226,6 +2304,10 @@ namespace TwilightTimer
                     return "twitimer match [status|enter|exit|start <roundId> <single|multi> [retryCount] [tag...]|resume ...|stop|tags [clear|tag...]|segments|leaderboard|penalty]\r\nDrive Twilight Cup match mode and round lifecycle directly through TwilightTimerApi (synchronous debug surface).";
                 case "sim":
                     return "twitimer sim [status|drain|enter|exit|start ...|resume ...|stop|tags ...|events [on|off|status]]\r\nDrive the registered ITimerProvider adapter; mutations are queued and applied by 'twitimer sim drain' or the next TimerCore.Update.";
+                case "update":
+                    return "twitimer update [status|check|apply|cancel|base [url]]\r\nCheck the GitHub releases feed for a newer TwilightTimer version and optionally download + install it (R13). 'base' sets a session-only repo-base URL override (testing; 'base clear' resets) — the feed and download URLs derive from it. Results are logged to the BepInEx log.";
+                case "about":
+                    return "twitimer about\r\nPrint plugin name, version, license notice, and repository URL (the About page content).";
                 default:
                     return "Unknown TwilightTimer command topic: " + topic + ". Type 'twitimer' for the command list.";
             }

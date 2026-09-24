@@ -329,9 +329,8 @@ public class MyPlugin : BaseUnityPlugin
 Contract:
 
 - The event fires after TwilightTimer's `ConfigService.SaveSettings()` writes its
-  config. That covers the settings panel's **Save** and **Close** buttons,
-  closing the panel with the settings key, game exit, and TwilightTimer's own
-  internal auto-saves (for example after a run reset).
+  config. That covers closing the panel with the settings key, game exit, and
+  TwilightTimer's own internal auto-saves (for example after a run reset).
 - Handlers run one at a time. If your handler throws, TwilightTimer logs the
   exception and continues saving/notifying other plugins; a broken handler
   cannot block TwilightTimer's own persistence.

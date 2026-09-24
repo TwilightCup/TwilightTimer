@@ -163,6 +163,18 @@ twitimer reload
 ```
 
 `twitimer panel open` should show the same IMGUI settings panel as the Home key.
+The **About** tab is the first entry in the panel navigation; it shows the
+plugin name, version, the first two lines of the MIT license, a **GitHub
+Repository** button, and a **Check Update** button (R13); when a newer release
+is found it shows the release title, its date + Highlights summary, and
+**Open Release Page** / **Update** buttons. `twitimer about` prints
+the same identity/license/repository text so it can be checked without a
+screenshot:
+
+```text
+twitimer panel open
+twitimer about
+```
 
 ### 6. Presets (R11)
 
@@ -292,7 +304,46 @@ twitimer config source twilighttimer
 `configDir=` line. The switch itself is stored in
 `config/TwilightTimer/config_dir.ini` (`[config] use_hsrtimer`).
 
-### 13. Twilight Cup match mode / round lifecycle (T2–T5)
+### 13. Update checker (R13)
+
+The About tab's **Check Update** flow can be exercised end to end from the
+console (results are logged to the BepInEx log, which `twitimer-cmd.sh` reads):
+
+```text
+twitimer update status                        # phase / repo base / feed / last checked tag
+twitimer update check                         # reads github.com/{owner}/{repo}/releases.atom
+twitimer update status                        # phase should become HasUpdate (or up to date / error)
+twitimer update apply                         # download + install the release DLL
+twitimer update status                        # phase should become RestartRequired
+```
+
+Without network access you can still exercise both the success and the failure
+paths by pointing the checker at a local HTTP server:
+
+```text
+twitimer update base http://127.0.0.1:PORT/repo   # session-only repo-base override
+twitimer update check                              # feed URL = <base>/releases.atom
+twitimer update apply                              # download URL = <base>/releases/download/<tag>/TwilightTimer-v<ver>.dll
+twitimer update base clear                         # restore the real repo base
+```
+
+Notes:
+
+- The feed must be GitHub Atom XML (`<feed>` with `<entry>` items; each entry's
+  alternate link ends in `/releases/tag/{tag}`, with `<title>` and optional
+  `<content type="html">`). The newest **non-prerelease** entry is used.
+- For a real apply test, serve a valid `.NET` assembly (e.g. a copy of
+  `TwilightTimer-v0.0.0.0.dll`) at the derived download path — the installer
+  rejects zero-byte / invalid downloads, so a non-assembly file exercises the
+  "invalid plugin DLL" error path; serving no file at all exercises the
+  "release asset not found" (404) path.
+- After a successful `apply`, verify on disk that `BepInEx/plugins/` contains
+  `TwilightTimer-v{newVersion}.dll` and no older `TwilightTimer-v*.dll` (an
+  undeletable one becomes `TwilightTimer-v*.dll.dis`, cleaned up at the next
+  launch).
+- `twitimer update cancel` aborts an in-flight check/download.
+
+### 14. Twilight Cup match mode / round lifecycle (T2–T5)
 
 `twitimer match` drives the direct `TwilightTimerApi` debug surface synchronously —
 ideal for checking lifecycle and data retention without TwilightCore in the
@@ -326,7 +377,7 @@ twitimer match exit
 - `twitimer match exit` restores the user's pre-match tag set; it does not clear
   round data.
 
-### 14. `ITimerProvider` adapter / event bus (T1, T4)
+### 15. `ITimerProvider` adapter / event bus (T1, T4)
 
 `twitimer sim` exercises the actual adapter registered with TwilightCore's
 `TimerProviderRegistry`. Mutating calls are queued through `MainThreadQueue`, so
@@ -358,7 +409,7 @@ twitimer sim events off
 - `twitimer sim start/resume/stop/tags` call the interface methods; `twitimer sim drain`
   runs the queued main-thread actions immediately.
 
-### 15. Shared leaderboard under the match leaderboard (T7.6)
+### 16. Shared leaderboard under the match leaderboard (T7.6)
 
 During a match session the shared leaderboard (subsegment/markers HUD) must be
 shown only while the match leaderboard is shown, hang directly below it, and
@@ -405,6 +456,8 @@ twitimer match exit
 - [ ] `twitimer retry` reloads the current level (or the configured override).
 - [ ] `twitimer hud off/on` hides/shows the timer HUD.
 - [ ] `twitimer panel open/close` opens/closes the settings panel.
+- [ ] The About tab (first in the navigation) shows name/version/license and the repository button; `twitimer about` matches it.
+- [ ] `twitimer update check` reports up to date / shows a newer release / shows a one-line error (offline), and `twitimer update apply` installs the DLL (R13).
 - [ ] `twitimer tag enable/disable` changes the enabled tags and persists them.
 - [ ] `twitimer set language zh-Hans` switches UI language.
 - [ ] `twitimer layout row add/remove` changes the HUD rows.
