@@ -6,6 +6,8 @@ on:
   push:
     branches:
       - main
+  # 允许在版本分支上手动试跑，用于发布前验证构建链（真正的发布仍由 push main 触发）。
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -113,38 +115,60 @@ jobs:
           echo "GAME_MANAGED=$GAME_MANAGED" >> "$GITHUB_ENV"
           echo "BEPINEX_CORE=$BEPINEX_CORE" >> "$GITHUB_ENV"
 
-      - name: Prepare TwilightCore (hard dependency)
+      # TwilightCore 是编译期硬依赖。工作流自己取一份源码并 Release 构建，不再依赖
+      # 自托管 runner 上手工维护的兄弟目录 / 预构建 DLL（旧的 TWILIGHTCORE secret
+      # 覆盖路径已废弃）。
+      #
+      # 默认跟踪 TwilightCore 的 dev 分支：只有它带 TwilightTimer 需要的扩展接口，
+      # main 与 tag v1.0.0p 都还没有。要钉死版本时设置仓库变量
+      # TWILIGHTCORE_REF=<commit sha 或 tag>，工作流会在日志里打印实际解析出的 commit。
+      - name: Fetch and build TwilightCore (hard dependency)
         shell: bash
+        env:
+          TWILIGHTCORE_REF: ${{ vars.TWILIGHTCORE_REF }}
+          TWILIGHTCORE_URL: https://github.com/TwilightCup/TwilightCore.git
         run: |
           set -euo pipefail
 
-          # The TwilightTimer branch hard-depends on TwilightCore's built DLL.
-          # Default path: a sibling checkout at ../TwilightCore (same as the
-          # csproj's default TWILIGHTCORE), overridable via the TWILIGHTCORE
-          # secret (absolute path to TwilightCore.dll).
-          if [ -n "${TWILIGHTCORE:-}" ]; then
-            if [ ! -f "$TWILIGHTCORE" ]; then
-              echo "::error::TWILIGHTCORE secret set but file not found: $TWILIGHTCORE"
+          REF="${TWILIGHTCORE_REF:-dev}"
+          SRC="$RUNNER_TEMP/TwilightCore"
+
+          rm -rf "$SRC"
+          git clone --quiet "$TWILIGHTCORE_URL" "$SRC"
+          git -C "$SRC" checkout --quiet --detach "origin/$REF" 2>/dev/null \
+            || git -C "$SRC" checkout --quiet --detach "$REF"
+
+          COMMIT="$(git -C "$SRC" rev-parse HEAD)"
+          echo "TwilightCore ref=$REF commit=$COMMIT"
+
+          dotnet build "$SRC/TwilightCore.csproj" -c Release
+
+          DLL="$SRC/bin/Release/netstandard2.0/TwilightCore.dll"
+          if [ ! -f "$DLL" ]; then
+            echo "::error::TwilightCore build produced no DLL at $DLL"
+            exit 1
+          fi
+
+          # TwilightTimer 编译期依赖这些符号；旧版 TwilightCore 只会让后面的编译
+          # 报出难懂的 CS0246/CS0117，这里先把真正的元凶点出来。
+          for sym in IResumableTimerProvider IRealtimeTimerProvider ITimerTagProvider GetEnglishLevelName; do
+            if ! grep -qa "$sym" "$DLL"; then
+              echo "::error::TwilightCore at $COMMIT (ref=$REF) does not provide $sym"
               exit 1
             fi
-            echo "TWILIGHTCORE=$TWILIGHTCORE" >> "$GITHUB_ENV"
-            exit 0
-          fi
+          done
 
-          TWC="$(pwd)/../TwilightCore/bin/Release/netstandard2.0/TwilightCore.dll"
-          if [ -f "$TWC" ]; then
-            echo "Using sibling TwilightCore build: $TWC"
-            exit 0
-          fi
-
-          echo "::error::TwilightCore.dll not found at $TWC. Check out TwilightCup/TwilightCore as a sibling of this repo (or pass its built DLL via the TWILIGHTCORE secret)."
-          exit 1
+          echo "TwilightCore.dll verified: $DLL"
+          echo "TWILIGHTCORE=$DLL" >> "$GITHUB_ENV"
 
       - name: Build
         shell: bash
         run: |
           set -euo pipefail
-          dotnet build src/TwilightTimer/TwilightTimer.csproj -c Release
+          # TWILIGHTCORE is exported by the previous step; pass it explicitly so the
+          # csproj's sibling-checkout default can never win.
+          dotnet build src/TwilightTimer/TwilightTimer.csproj -c Release \
+            -p:TWILIGHTCORE="$TWILIGHTCORE"
 
       - name: Verify versioned DLL
         shell: bash
