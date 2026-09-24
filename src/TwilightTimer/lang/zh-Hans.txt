@@ -64,7 +64,6 @@ SETTINGS_PRESET_SAVE_FAILED:保存所选预设失败。
 SETTINGS_PRESET_DELETE_FAILED:删除所选预设失败。
 SETTINGS_PRESET_FAILED:预设操作失败。
 SETTINGS_USE_HSRTIMER_CONFIG:使用 HSRTimer 配置目录
-SETTINGS_USE_HSRTIMER_CONFIG_NOTE:全部配置改从 BepInEx/config/HSRTimer/ 读取并写入（不再使用 BepInEx/config/TwilightTimer/）。立即生效；仅在该目录存在时显示。
 
 # ===== 对局排行榜 HUD =====
 LEADERBOARD_YOU:你

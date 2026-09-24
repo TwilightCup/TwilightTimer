@@ -64,7 +64,6 @@ SETTINGS_PRESET_SAVE_FAILED:Failed to save the selected preset.
 SETTINGS_PRESET_DELETE_FAILED:Failed to delete the selected preset.
 SETTINGS_PRESET_FAILED:Preset operation failed.
 SETTINGS_USE_HSRTIMER_CONFIG:Use HSRTimer config directory
-SETTINGS_USE_HSRTIMER_CONFIG_NOTE:Reads and writes all config in BepInEx/config/HSRTimer/ instead of BepInEx/config/TwilightTimer/. Applies immediately; only shown while that directory exists.
 
 # ===== In-match leaderboard HUD =====
 LEADERBOARD_YOU:You
