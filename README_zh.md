@@ -107,7 +107,7 @@ dotnet build src/TwilightTimer/TwilightTimer.csproj
 - [设置面板](docs/zh/PANEL.md)
 - [本地化](docs/zh/LOCALIZATION.md) · [扩展(自定义标签 & 设置面板标签页)](docs/zh/EXTENDING.md)
 - [旁白检测](docs/zh/VOICELINE.md)
-- [测试(游戏内控制台)](docs/TESTS.md)
+- [测试(游戏内控制台)](docs/zh/TESTS.md)
 
 ## 许可证
 

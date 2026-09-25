@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Multiplayer;
 using UnityEngine;
 
@@ -6,7 +7,11 @@ namespace TwilightTimer
     /// <summary>
     /// The timer engine. A single polling MonoBehaviour drives all timing,
     /// segment, reset, validity, and tag logic each frame by reading public
-    /// game fields — no game-method patching (see docs/ARCHITECTURE.md).
+    /// game fields. The only exceptions are the precise start/end boundary
+    /// hooks (see <see cref="RecordSegmentStart"/>/<see cref="RecordLevelPass"/>
+    /// and docs/ARCHITECTURE.md): they record the exact tick where the game
+    /// flips state inside its own physics step, which a poll can only observe
+    /// a tick late.
     ///
     /// <see cref="FixedUpdate"/>: accumulation + state-transition detection
     /// (Appendix B) + per-tick tag rules on segment end.
@@ -26,6 +31,45 @@ namespace TwilightTimer
 
         private HumanState _prevHumanState;
         private bool _prevHumanStateInit;
+
+        // Mark the physics step the poll last processed. The boundary hooks
+        // compare it against Time.fixedTime to tell whether their step has
+        // already been counted, so the segment-end tick is exact no matter how
+        // Unity orders this plugin's FixedUpdate against the game's.
+        private float _lastFixedTime = float.NaN;
+
+        // Authoritative segment-start snapshot latched by the Game.AfterLoad
+        // postfix (TB-3). Consumed by StartSegment.
+        private bool _segmentStartLatched;
+        private ulong _segmentStartTicks;
+        private double _segmentStartPause;
+
+        // Ring buffer of recent segment-start/end boundaries, exposed through
+        // 'hsr clock history' so repeated loads/passes can be checked for zero
+        // tick jitter (TB-5).
+        private const int BoundaryLogCapacityConst = 200;
+        private static readonly List<string> BoundaryEntries = new List<string>();
+
+        public static int BoundaryLogCapacity => BoundaryLogCapacityConst;
+
+        public static IReadOnlyList<string> BoundaryLog => BoundaryEntries;
+
+        public static void ClearBoundaryLog() => BoundaryEntries.Clear();
+
+        private static void LogBoundary(string entry)
+        {
+            BoundaryEntries.Add(entry);
+            if (BoundaryEntries.Count > BoundaryLogCapacityConst)
+                BoundaryEntries.RemoveAt(0);
+        }
+
+        /// <summary>
+        /// True when this plugin's <see cref="FixedUpdate"/> has already run for
+        /// the current physics step (used by the boundary hooks to decide
+        /// whether the current step is already in <see cref="RunState.PlayableTicks"/>).
+        /// </summary>
+        public static bool HasProcessedCurrentPhysicsStep
+            => Instance != null && Instance._lastFixedTime == Time.fixedTime;
 
         private void Awake()
         {
@@ -53,6 +97,11 @@ namespace TwilightTimer
         // ── Physics step: accumulation + transitions + per-tick rules ───────
         private void FixedUpdate()
         {
+            // Record the step first so boundary hooks firing later in the same
+            // step can see that it has been processed.
+            _lastFixedTime = Time.fixedTime;
+            GameClock.Advance();
+
             // Always advance the transition cache so a transient null Game.instance
             // (scene teardown) doesn't leave a stale prev that manufactures a
             // spurious transition on resume. Treat a null game as Inactive.
@@ -82,6 +131,7 @@ namespace TwilightTimer
                 HandleTransitions(game, gState, aState, isLocal);
                 TrackRespawn(game, gState);
                 Accumulate(game, gState, aState);
+                State.GameTimeSeconds = GameClock.Seconds(State.PlayableTicks, State.PauseAccum);
                 TrackWakeUp(game, gState);
                 SubsegmentManager.Instance?.OnPhysicsTick(game, gState, State);
                 MarkersManager.Instance?.OnPhysicsTick(game, gState, State);
@@ -108,9 +158,16 @@ namespace TwilightTimer
             GenericValidators.CheckCheat(State.Flags);
 
             // B.2 pause supplement (always on; runs here because FixedUpdate is
-            // paused when timeScale=0).
-            if (SegmentLogic.ShouldAccumulatePause(gState, State.TimingActive))
-                State.GameTime += Time.unscaledDeltaTime;
+            // paused when timeScale=0). Pause time is wall-clock, the one
+            // non-tick game-time component (R1.8.3/TB-6). Once a pass boundary
+            // has been latched the run's game clock is already frozen, so a
+            // pause in the short post-pass window must not extend it either.
+            if (!State.PendingEndTicks.HasValue
+                && SegmentLogic.ShouldAccumulatePause(gState, State.TimingActive))
+            {
+                State.PauseAccum += Time.unscaledDeltaTime;
+                State.GameTimeSeconds = GameClock.Seconds(State.PlayableTicks, State.PauseAccum);
+            }
 
             // Subsegment quiet-settle windows run in unscaled time so they
             // continue through pauses (R8.4.3.4).
@@ -218,7 +275,18 @@ namespace TwilightTimer
             State.Retrying = false;
 
             int cp = game.currentCheckpointNumber;
-            State.BeginSegment(State.GameTime, game.currentLevelNumber, game.currentLevelType, cp);
+            // TB-3: prefer the exact tick latched by the Game.AfterLoad hook.
+            // It is consumed here (the poll's IsSegmentStart fires on the first
+            // playable FixedUpdate after AfterLoad, so the values normally
+            // coincide; the latch keeps the authoritative hook as the source).
+            ulong startTicks = _segmentStartLatched && _segmentStartTicks <= State.PlayableTicks
+                ? _segmentStartTicks
+                : State.PlayableTicks;
+            double startPause = _segmentStartLatched && _segmentStartTicks <= State.PlayableTicks
+                ? _segmentStartPause
+                : State.PauseAccum;
+            _segmentStartLatched = false;
+            State.BeginSegment(startTicks, startPause, game.currentLevelNumber, game.currentLevelType, cp);
             _prevHumanStateInit = false;
 
             // Snapshot the LC collection-run context AT SEGMENT START, together
@@ -309,6 +377,8 @@ namespace TwilightTimer
 
             // Fire tag OnLevelEnter for every enabled tag.
             ForEachEnabledRule(rule => Safe(rule, r => r.OnLevelEnter(MakeContext(game))));
+
+            LogBoundary($"start level={State.CurrentLevelNumber} type={State.CurrentLevelType} tick={startTicks} pause={startPause:0.###} step={GameClock.CurrentTick}");
         }
 
         private void EndSegment(Game game, bool completed)
@@ -321,13 +391,21 @@ namespace TwilightTimer
             if (!State.InSegment)
                 return;
 
-            double end = State.GameTime;
-            double segStart = State.SegmentStart; // captured before EndSegment mutates it
+            // TB-3: use the pass-zone hook's exact end tick when one was
+            // latched; otherwise (a mid-level quit, which records nothing) fall
+            // back to the polled tick.
+            ulong endTicks = State.PendingEndTicks ?? State.PlayableTicks;
+            double endPause = State.PendingEndTicks.HasValue ? State.PendingEndPause : State.PauseAccum;
+            double end = GameClock.Seconds(endTicks, endPause);
+            double segStart = GameClock.SegmentStartSeconds(State); // captured before EndSegment mutates it
             int roundIndex = State.RoundSegmentIndex;
             bool retrying = State.Retrying;
 
-            // Fire tag OnLevelExit FIRST — but only for a genuine level
-            // completion. A retry or a mid-level quit abandons the level (its
+            ulong durationTicks = endTicks >= State.SegmentStartTicks ? endTicks - State.SegmentStartTicks : 0UL;
+            bool fromHook = State.PendingEndTicks.HasValue;
+            LogBoundary($"end   level={State.CurrentLevelNumber} tick={endTicks} dur={durationTicks} completed={completed} retrying={retrying} src={(fromHook ? "hook" : "poll")} step={GameClock.CurrentTick}");
+
+            // Fire tag OnLevelExit first — but only for a genuine level
             // reload/leave drives it through PlayingLevel → Inactive/LoadingLevel,
             // a segment end); running OnLevelExit then would let the checkpoint
             // final-check (R4.2) and voiceline-completion check fire against the
@@ -352,7 +430,7 @@ namespace TwilightTimer
             MarkersManager.Instance?.OnLevelEnd(
                 game, State, end, completed, retrying,
                 game != null ? game.state : GameState.Inactive, App.state);
-            State.EndSegment(end, completed);
+            State.EndSegment(endTicks, endPause, completed);
 
             // T4.1/T4.4: report the segment outcome to the round tracker.
             // Only genuine outcomes count — a retry reload abandons its
@@ -379,7 +457,8 @@ namespace TwilightTimer
                 bool collectionDone = State.OnCollectionLastLevel;
                 if (campaignDone || standaloneEditorPick || collectionDone)
                 {
-                    State.LastRun = end;
+                    State.LastRunTicks = endTicks;
+                    State.LastRunPause = endPause;
                     // The real-time clock freezes at the same moment the game
                     // clock records the completed run.
                     State.RealTimeActive = false;
@@ -426,22 +505,22 @@ namespace TwilightTimer
 
             var prev = _prevHumanState;
             if (human.state == HumanState.Spawning && prev != HumanState.Spawning)
-                State.RestartWakeUpMeasurement(State.GameTime);
+                State.RestartWakeUpMeasurement(State.PlayableTicks, State.PauseAccum);
             _prevHumanState = human.state;
         }
 
         /// <summary>
         /// Record the current Wake Up Time when the local player leaves the
         /// soft/spawn state. The duration is measured from
-        /// <see cref="RunState.WakeUpMeasureStart"/>, which is the segment start
-        /// in "only first wake-up" mode and the latest respawn/restart moment in
-        /// the default mode. Once recorded it is not reset by later manual
-        /// play-dead within the same measurement; a new respawn clears it so the
-        /// next wake-up can be measured.
+        /// <see cref="RunState.WakeUpMeasureStartTicks"/>, which is the segment
+        /// start in "only first wake-up" mode and the latest respawn/restart
+        /// moment in the default mode. Once recorded it is not reset by later
+        /// manual play-dead within the same measurement; a new respawn clears it
+        /// so the next wake-up can be measured.
         /// </summary>
         private void TrackWakeUp(Game game, GameState gState)
         {
-            if (State.WakeUpTime.HasValue || !State.InSegment || gState != GameState.PlayingLevel)
+            if (State.WakeUpTicks.HasValue || !State.InSegment || gState != GameState.PlayingLevel)
                 return;
             var human = Human.Localplayer;
             if (human == null)
@@ -449,14 +528,25 @@ namespace TwilightTimer
             if (human.state == HumanState.Spawning || human.state == HumanState.Unconscious || human.state == HumanState.Dead)
                 return;
 
-            State.WakeUpTime = State.GameTime - State.WakeUpMeasureStart;
+            State.WakeUpTicks = State.PlayableTicks >= State.WakeUpMeasureStartTicks
+                ? State.PlayableTicks - State.WakeUpMeasureStartTicks
+                : 0UL;
+            State.WakeUpPause = State.PauseAccum >= State.WakeUpMeasureStartPause
+                ? State.PauseAccum - State.WakeUpMeasureStartPause
+                : 0d;
         }
 
         // ── Accumulation (B.1) ─────────────────────────────────────────────
         private void Accumulate(Game game, GameState gState, AppSate aState)
         {
+            // Once the pass hook has latched the segment's exact end tick the
+            // game clock is frozen at it, even though the state may stay
+            // PlayingLevel for a few more physics steps while the game starts
+            // the load (TB-3).
+            if (State.PendingEndTicks.HasValue)
+                return;
             if (SegmentLogic.ShouldAccumulateFixed(gState, aState, State.TimingActive))
-                State.GameTime += Time.fixedDeltaTime;
+                State.PlayableTicks++;
         }
 
         // ── Per-tick tag rules (skip/jump/nocheckpoint/voiceline-tick) ──────
@@ -582,9 +672,14 @@ namespace TwilightTimer
             }
             if (InputUtil.GetKeyDown(s.RetryKey))
             {
+                // A successful retry is silent: logging its outcome on every
+                // press would spam the BepInEx log during normal play. Only log
+                // when the retry is refused, so the block reason stays
+                // diagnosable without the per-press noise.
                 if (RetryAction.TryExecute(this, State, s, out string key))
                     UpdateOptions(); // restart may change timing context
-                Notify(key);
+                else
+                    Notify(key);
             }
         }
 
@@ -629,7 +724,7 @@ namespace TwilightTimer
             var core = Instance;
             if (core == null || State == null)
                 return;
-            State.RestartWakeUpMeasurement(State.GameTime);
+            State.RestartWakeUpMeasurement(State.PlayableTicks, State.PauseAccum);
             var human = Human.Localplayer;
             if (human != null)
             {
@@ -642,6 +737,81 @@ namespace TwilightTimer
             }
         }
 
+        // ── Precise boundary hooks (TB-3) ─────────────────────────────────
+        /// <summary>
+        /// Latch the authoritative segment-start tick. Called from the
+        /// <c>Game.AfterLoad</c> postfix — the moment the game assigns
+        /// <c>state = PlayingLevel</c> (R1.2.2). The value is consumed by
+        /// <see cref="StartSegment"/> on the next physics step. Recording the
+        /// tick here makes the boundary independent of the script execution
+        /// order that used to add a random ±1 tick.
+        /// </summary>
+        public static void RecordSegmentStart()
+        {
+            var core = Instance;
+            var st = State;
+            if (core == null || st == null)
+                return;
+            core._segmentStartLatched = true;
+            core._segmentStartTicks = st.PlayableTicks;
+            core._segmentStartPause = st.PauseAccum;
+            long loadLevel = Game.instance != null ? Game.instance.currentLevelNumber : -1;
+            LogBoundary($"load  level={loadLevel} tick={st.PlayableTicks} step={GameClock.CurrentTick} processed={HasProcessedCurrentPhysicsStep}");
+        }
+
+        /// <summary>
+        /// Latch the authoritative segment-end tick after the game has detected
+        /// a genuine level pass (<c>Game.Fall</c> taking the <c>passedLevel</c>
+        /// branch, R1.4.2). The tick is the step's exact index, including the
+        /// pass step itself ("终点含最后一帧", TB-4); the poll then freezes
+        /// accumulation at it and records the segment on the observed state
+        /// flip. Suppressed under <c>Retrying</c> (R6) and outside a segment, so
+        /// an abandoned attempt never ends a segment (TB-7).
+        /// </summary>
+        public static void RecordLevelPass()
+        {
+            var core = Instance;
+            var st = State;
+            if (core == null || st == null)
+                return;
+            if (!st.InSegment || st.Retrying)
+                return;
+            if (st.PendingEndTicks.HasValue)
+                return;
+
+            st.LevelPassed = true;
+            // The hook can run before or after this plugin's FixedUpdate within
+            // the same physics step. When it runs first, the pass step has not
+            // been counted yet — include it explicitly (but only if this step is
+            // actually a playable one, so a boundary in a non-accumulating
+            // context cannot over-count). Accumulation is frozen from here so it
+            // is never double-counted.
+            ulong endTicks = st.PlayableTicks;
+            if (!HasProcessedCurrentPhysicsStep
+                && Game.instance != null
+                && SegmentLogic.ShouldAccumulateFixed(Game.instance.state, App.state, st.TimingActive))
+            {
+                endTicks++;
+            }
+            st.PlayableTicks = endTicks;
+            st.PendingEndTicks = endTicks;
+            st.PendingEndPause = st.PauseAccum;
+            st.GameTimeSeconds = GameClock.Seconds(st.PlayableTicks, st.PauseAccum);
+            LogBoundary($"pass  level={st.CurrentLevelNumber} tick={endTicks} step={GameClock.CurrentTick}");
+        }
+
+        /// <summary>
+        /// Latch only the completion flag (used by the <c>Game.EnterPassZone</c>
+        /// postfix, R1.4.2). The segment's end tick is recorded later, at the
+        /// authoritative <c>Game.Fall</c> pass detection.
+        /// </summary>
+        public static void LatchLevelPassed()
+        {
+            var st = State;
+            if (st != null && st.InSegment)
+                st.LevelPassed = true;
+        }
+
         private void DoFullReset(bool keepLastValues, bool keepLastRun = false)
         {
             SubsegmentManager.Instance?.OnRunReset();
@@ -650,6 +820,7 @@ namespace TwilightTimer
             State.Flags.ClearAll();
             _cpEdgeInit = false;
             _prevHumanStateInit = false;
+            _segmentStartLatched = false;
             UpdateOptions();
         }
 

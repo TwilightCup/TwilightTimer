@@ -28,6 +28,7 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 | `twitimer` | 打印完整命令摘要 |
 | `twitimer help [topic]` | 打印某个主题的帮助 |
 | `twitimer status` | 输出计时器 / 配置 / HUD / 分段 / 标记 / LC 的实时状态 |
+| `twitimer clock [status\|history [n]\|clear]` | 查看纯整数 tick 游戏时钟与分段边界(R1.11) |
 | `twitimer keys` | 列出所有可设置的 settings/layout 键 |
 | `twitimer get <key>` / `twitimer get all` | 读取单个配置值,或全部配置值 |
 | `twitimer set <key> <value>` | 设置并保存一个配置值 |
@@ -35,6 +36,7 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 | `twitimer save` | 保存当前内存中的配置 |
 | `twitimer reset` | 整局重置(等同于重置键) |
 | `twitimer retry` | 一键重试(等同于重试键,R6) |
+| `twitimer pass [real]` | 模拟通关流程:默认设置 `Game.passedLevel` 后派发 `Game.Fall`;`real` 清零动量、松手并把玩家传送到判定箱内,由游戏自身触发完成通关。两种模式都不写入分段 / 标记 PB |
 | `twitimer hud [on\|off\|toggle\|status]` | 控制计时 HUD 的显示 |
 | `twitimer panel [open\|close\|toggle\|status]` | 控制设置面板 |
 | `twitimer leaderboard [cycle\|show\|hide\|mode <Subsegment\|Markers>\|status]` | 控制排行榜 HUD |
@@ -78,12 +80,34 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 
 ```text
 twitimer status                 # 查看游戏/应用状态、游戏时间、分段、现实时间
+twitimer clock                  # 纯整数 tick 时钟:PlayableTicks、分段起止 tick
+twitimer clock history          # 最近的分段起止 tick(抖动检查,R1.11)
+twitimer clock clear            # 清空边界历史
 twitimer reset                  # 验证计时器归零、标记被清除
 twitimer retry                  # 验证一键重试会重载关卡
+twitimer pass                   # 模拟通关当前关卡(过关)
+twitimer pass real              # 传送到判定箱内,让游戏自身完成通关
 ```
 
 在关卡内,`twitimer status` 应显示 `segment=True`、`timing=True` 且 `gameTime` 持续增长。
 执行 `twitimer reset` 后,`gameTime` 应为 `0`,`inSegment` 应为 `False`(或过渡缓存被保留,关卡不会因此重新计时)。
+
+`twitimer pass` 在不触碰出口判定箱的情况下驱动真实通关流程:它像 `Game.EnterPassZone` 一样设置
+`Game.passedLevel`,等待一帧让引擎闩锁 `LevelPassed`,然后调用 `Game.Fall` —— 因此 BuiltIn 战役关卡经由
+`PassLevel` → `StartNextLevel` 前进,Workshop / EditorPick 关卡经由 `PauseLeave` 离开。之后
+`twitimer status` 应显示最终分段时间,且(整局最后一关)`lastRun` 有值。它需要一个带本地玩家的活跃分段,
+对客户端 / 重放播放无效。**分段与标记 PB 故意不写入**(测试性通关),真实 PB 文件不受影响。
+
+`twitimer pass real` 走真实的触发链而不是强行设置标志:它清零玩家动量(所有身体部位的线速度与角速度)、
+松开双手抓取,并把本地玩家传送到当前关卡 `LevelPassTrigger`(通关判定箱)中心。之后游戏自身流程接管 ——
+判定箱闩锁 `passedLevel`,玩家落入下方的 `FallTrigger`,`Game.Fall` 完成通关。PB 抑制方式与默认模式完全一致。
+若命令报告 `LevelPassed` 未被闩锁,说明关卡的通关触发箱无法进入(碰撞体 / 标签 / 布局问题)。
+
+**边界确定性(R1.11)。** `twitimer clock` 打印原始整数 tick 时钟(`playableTicks`、`segmentStartTicks`、`pendingEndTicks` 等)。`twitimer clock history` 列出每次分段起止 tick:连续载入 + 通关同一关卡 50 次,相同操作下的 `dur=`(终点 tick − 起点 tick)必须**完全一致**(零 ±1 抖动)。测量前用 `twitimer clock clear` 清空历史。
+
+每条 `end` 记录带两个诊断字段:`src=hook|poll` 表示终点 tick 是由精确的 `Game.Fall` 边界 hook 锁定(真实通关)还是由轮询记录(中途退出);`step=` 是观察到该边界的全局物理帧。另有一条 `pass` 行标记权威过关 tick。二者合起来说明:**过关到状态翻转之间的物理帧没有被计入分段** —— 这正是旧版 ±1 抖动的来源。
+
+起点侧同样成对出现:`load` 是 `Game.AfterLoad` hook 帧(权威分段起点),紧随其后的 `start` 行是轮询消费该闩锁的结果。`start` 的 tick 等于 `load` 的 tick 而 `step=` 更大,即证明起点边界不再取决于轮询何时发现它。
 
 ### 2. 有效性标记(R5)
 
@@ -407,7 +431,10 @@ twitimer match exit
 - [ ] `twitimer` 打印命令摘要。
 - [ ] 关卡内 `twitimer status` 显示合理的实时值。
 - [ ] `twitimer reset` 将计时器归零并清除标记。
+- [ ] `twitimer clock` 显示整数 tick,且 `twitimer clock history` 对重复的相同操作记录一致的 `dur=`(R1.11)。
 - [ ] `twitimer retry` 重载当前关卡(或配置的重定向目标)。
+- [ ] `twitimer pass` 完成当前关卡;`twitimer status` 显示记录的分段以及(最后一关)`lastRun`,且没有分段 / 标记 PB 文件被改动。
+- [ ] `twitimer pass real` 把玩家传送到判定箱内,游戏自身触发流程完成关卡(`LevelPassed` 被闩锁);PB 依旧不写入。
 - [ ] `twitimer hud off/on` 隐藏 / 显示计时 HUD。
 - [ ] `twitimer panel open/close` 打开 / 关闭设置面板。
 - [ ] `twitimer tag enable/disable` 改变启用的标签并持久化。

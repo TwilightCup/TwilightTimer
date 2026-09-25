@@ -40,6 +40,7 @@ persist to the normal `settings.ini` / `tags.ini` / `layout.ini` files.
 | `twitimer` | Print the full command summary |
 | `twitimer help [topic]` | Print help for one topic |
 | `twitimer status` | Dump live timer/config/HUD/subsegment/marker/LC state |
+| `twitimer clock [status\|history [n]\|clear]` | Inspect the pure-tick game clock and segment boundaries (R1.11) |
 | `twitimer keys` | List every settable settings/layout key |
 | `twitimer get <key>` / `twitimer get all` | Read one config value, or all values |
 | `twitimer set <key> <value>` | Set and save a config value |
@@ -47,6 +48,7 @@ persist to the normal `settings.ini` / `tags.ini` / `layout.ini` files.
 | `twitimer save` | Save current in-memory config |
 | `twitimer reset` | Full-run reset (same as the reset key) |
 | `twitimer retry` | One-key retry (same as the retry key, R6) |
+| `twitimer pass [real]` | Simulate a level-completion flow: default sets `Game.passedLevel` then dispatches `Game.Fall`; `real` clears momentum, releases grabs and teleports the player into the pass zone so the game's own triggers complete the level. No subsegment/marker PB is written |
 | `twitimer hud [on\|off\|toggle\|status]` | Control timer HUD visibility |
 | `twitimer panel [open\|close\|toggle\|status]` | Control the settings panel |
 | `twitimer leaderboard [cycle\|show\|hide\|mode <Subsegment\|Markers>\|status]` | Control the leaderboard HUD |
@@ -92,14 +94,57 @@ Unity `KeyCode` names (e.g. `Backspace`, `R`, `Home`, `Tab`). Colors accept
 
 ```text
 twitimer status                 # see game/app state, game time, segment, real time
+twitimer clock                  # pure-tick clock: PlayableTicks, segment start/end ticks
+twitimer clock history          # last segment start/end ticks (jitter check, R1.11)
+twitimer clock clear            # clear the boundary history
 twitimer reset                  # verify timers zero and flags clear
 twitimer retry                  # verify one-key retry reloads the level
+twitimer pass                   # simulate passing the current level (过关)
+twitimer pass real              # teleport into the pass zone and let the game complete it
 ```
 
 While playing a level, `twitimer status` should show `segment=True`, `timing=True`
 and an increasing `gameTime`. After `twitimer reset`, `gameTime` should be `0` and
 `inSegment` should be `False` (or the transition cache is preserved so the
 level does not restart).
+
+`twitimer pass` drives the real completion flow without touching the exit zone: it
+sets `Game.passedLevel` (like `Game.EnterPassZone`), waits one frame for the
+engine to latch `LevelPassed`, then calls `Game.Fall` — so a BuiltIn campaign
+level advances via `PassLevel` → `StartNextLevel`, and a Workshop/EditorPick
+level leaves via `PauseLeave`. Afterwards `twitimer status` should show the final
+segment time and (for the last level of a run) a `lastRun` value. It requires
+an active segment with a local player and is a no-op for clients / during
+replays. **Subsegment and marker PBs are deliberately not written** (it is a
+test pass), so real PB files stay untouched.
+
+`twitimer pass real` exercises the actual trigger chain instead of forcing the
+flag: it zeroes the player's momentum (linear + angular on every body part),
+releases both hand grabs, and teleports the local player to the center of the
+current level's `LevelPassTrigger` (the 通关判定箱). The game's own flow then
+takes over — the pass zone latches `passedLevel`, the player drops into the
+`FallTrigger` below and `Game.Fall` completes the level. PBs are suppressed
+exactly as in default mode. If the command reports that `LevelPassed` was not
+latched, the level's pass trigger could not be entered (collider/tag/layout).
+
+**Boundary determinism (R1.11).** `twitimer clock` prints the raw integer tick clock
+(`playableTicks`, `segmentStartTicks`, `pendingEndTicks`, …). `twitimer clock
+history` lists each segment start/end tick: load + finish a level 50 times and
+the `dur=` (end tick − start tick) for the same level and same inputs must be
+**identical** every time (zero ±1 jitter). `twitimer clock clear` resets the history
+before a measurement run.
+
+Each history `end` line carries two diagnostics: `src=hook|poll` says whether
+the precise `Game.Fall` boundary hook fixed the end tick (a genuine completion)
+or the polling loop recorded it (a mid-level quit), and `step=` is the global
+physics step it was observed on. A `pass` line marks the authoritative pass
+tick. Together they show that physics steps between the pass and the observed
+state flip are **not** counted into the segment — the source of the old ±1.
+
+The same pair exists on the start side: `load` is the `Game.AfterLoad` hook frame
+(the authoritative segment start) and the following `start` line is the polling
+loop consuming that latch. A `start tick` equal to `load tick` with a larger
+`step=` proves the start boundary no longer depends on when the poll noticed it.
 
 ### 2. Validity flags (R5)
 
@@ -466,7 +511,10 @@ twitimer match exit
 - [ ] `twitimer` prints the command summary.
 - [ ] `twitimer status` shows plausible live values while in a level.
 - [ ] `twitimer reset` zeroes timers and clears flags.
+- [ ] `twitimer clock` shows integer ticks and `twitimer clock history` records identical `dur=` for repeated identical runs (R1.11).
 - [ ] `twitimer retry` reloads the current level (or the configured override).
+- [ ] `twitimer pass` completes the current level; `twitimer status` shows the recorded segment and (on the final level) `lastRun`, and no subsegment/marker PB file changed.
+- [ ] `twitimer pass real` teleports the player into the pass zone and the game's own trigger flow completes the level (with `LevelPassed` latched); PBs still not written.
 - [ ] `twitimer hud off/on` hides/shows the timer HUD.
 - [ ] `twitimer panel open/close` opens/closes the settings panel.
 - [ ] The About tab (first in the navigation) shows name/version/license and the repository button; `twitimer about` matches it.
