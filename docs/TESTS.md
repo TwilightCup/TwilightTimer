@@ -290,6 +290,12 @@ twitimer marker clear
 The marker overlay/feed should react to these changes when edit mode is enabled
 (`twitimer set markers_edit_mode true`).
 
+The leaderboard feed must reset **per attempt**: after `twitimer pass` completes the
+level and the next attempt starts — including when the next level is the same
+level again (a repeated campaign level) — `twitimer marker feed` should list only the
+new attempt's rows. The new attempt's first trigger replaces the previous
+attempt's stale rows instead of appending to them.
+
 ### 9. Localization (R7)
 
 ```text

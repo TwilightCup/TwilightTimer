@@ -7,6 +7,7 @@ This file contains user-facing release notes for TwilightTimer. Only changes tha
 - **Release Date:** Unreleased
 - **Highlights:** _To be filled during version branch preparation._
 - **Details:**
+  - Based on upstream HSRTimer v1.7.1.
 - **Contributors:** _To be filled from PRs merged into dev._
 
 ## 1.7.0.0
