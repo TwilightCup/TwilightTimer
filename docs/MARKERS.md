@@ -14,7 +14,8 @@ module's PB + LoadPath model.
   subsegment rule (R8.2.4): `Any` with no enabled tags, otherwise the sorted
   enabled tag ids joined with `+`.
 - A marker's time is the **segment time** at the trigger frame:
-  `t_ms = round((GameTime - SegmentStart) * 1000)` — the same time base as the
+  `t_ms = round((PlayableTicks - SegmentStartTicks) * tickSeconds * 1000)` (via
+  `GameClock.SegmentMs`) — the same time base as the
   HUD's *Segment Time* row and the subsegment IL comparisons.
 - Each marker records only its **first** trigger per level attempt. Records and
   the leaderboard feed reset on level start, one-key retry, pause-menu level
@@ -145,8 +146,11 @@ In Markers mode:
 - The faster/slower/tie colors always apply: faster than PB = green, slower =
   red, tie/no PB = white, in both time modes.
 - The feed survives the level-end transition (the previous level's feed stays
-  on screen until the next level's first trigger replaces it) unless the next
-  level has no markers, in which case it clears immediately.
+  on screen until the new attempt's first trigger replaces it) unless the new
+  level has no markers, in which case it clears immediately. Replacement is
+  per attempt — it also applies when the next level is the same level again
+  (a repeated campaign level), so stale rows from the previous attempt never
+  linger next to the new ones.
 - Switching the mode does not affect subsegment recording or PB writes.
 
 ## Presets (R11)

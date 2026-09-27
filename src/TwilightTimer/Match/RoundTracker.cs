@@ -335,13 +335,13 @@ namespace TwilightTimer
             get
             {
                 var s = TimerCore.State;
-                return s == null ? 0 : Ms(s.GameTime - s.SegmentStart);
+                return s == null ? 0 : GameClock.SegmentMs(s);
             }
         }
 
         /// <summary>Game-time ms accumulated this round.</summary>
         public static long RoundTotalMs
-            => TimerCore.State != null ? Ms(TimerCore.State.GameTime) : 0;
+            => TimerCore.State != null ? Ms(GameClock.Seconds(TimerCore.State.PlayableTicks, TimerCore.State.PauseAccum)) : 0;
 
         /// <summary>Wall-clock (Real Time) ms accumulated this round.</summary>
         public static long RoundRealTimeMs

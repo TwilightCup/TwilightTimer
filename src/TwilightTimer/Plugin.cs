@@ -86,7 +86,7 @@ namespace TwilightTimer
             registry.Register(new GlitchlessTagRule());
             registry.Register(new NoEcTagRule());
 
-            // 3. Harmony patches (voiceline hooks only).
+            // 3. Harmony patches (voiceline / pause-menu / Jumpless / timing-boundary hooks).
             PatchModule.Apply();
 
             // 4. TwilightCore built-in LevelCollections integration (direct API).
