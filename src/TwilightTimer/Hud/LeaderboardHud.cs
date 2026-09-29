@@ -22,6 +22,11 @@ namespace TwilightTimer
     /// Subsegment mode would otherwise leave the block empty). The mode-cycle
     /// key is disabled for the whole match session so the competition display
     /// cannot be flipped by a stray keypress.
+    ///
+    /// A content mode whose module is currently unavailable — user-disabled in
+    /// settings or auto-disabled by another mechanism (e.g. the co-op client
+    /// gate, R8.10) — is left out of the rotation: e.g. with subsegment
+    /// disabled the cycle is only hidden ↔ Markers (R8.5.1.2).
     /// </summary>
     public sealed class LeaderboardHud : MonoBehaviour
     {
@@ -41,6 +46,31 @@ namespace TwilightTimer
         /// <summary>True when the last draw hung below the match leaderboard (T7.6).</summary>
         public bool AnchoredBelowMatch { get; private set; }
 
+        /// <summary>
+        /// Content modes currently available for the cycle, in canonical order
+        /// (Subsegment first, then Markers), filtered to those that are
+        /// user-enabled and not auto-disabled (R8.5.1.2).
+        /// </summary>
+        public static List<string> AvailableModes()
+        {
+            var modes = new List<string>(2);
+            var sub = SubsegmentManager.Instance;
+            if (sub != null && sub.IsLeaderboardAvailable)
+                modes.Add("Subsegment");
+            var markers = MarkersManager.Instance;
+            if (markers != null && markers.IsLeaderboardAvailable)
+                modes.Add("Markers");
+            return modes;
+        }
+
+        private static int IndexOfMode(List<string> modes, string mode)
+        {
+            for (int i = 0; i < modes.Count; i++)
+                if (string.Equals(modes[i], mode, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            return -1;
+        }
+
         private void Awake()
         {
             Instance = this;
@@ -59,33 +89,49 @@ namespace TwilightTimer
         }
 
         /// <summary>
-        /// Cycle the leaderboard through hidden → Subsegment → Markers → hidden.
-        /// When turning it back on from hidden, it always starts in Subsegment
-        /// mode; while visible it switches between the two content modes.
+        /// Cycle the leaderboard through hidden → (available content modes) →
+        /// hidden. A mode whose module is disabled — by the user's settings or
+        /// by an auto-disable mechanism — is skipped: the rotation only
+        /// contains modes that are currently available (R8.5.1.2). When
+        /// turning it back on from hidden, it starts in the first available
+        /// mode (Subsegment preferred); while visible it switches between the
+        /// available content modes and hides after the last one. If no content
+        /// mode is available at all, the board stays hidden.
         /// </summary>
         public void CycleMode()
         {
             var cfg = ConfigService.Instance;
             if (cfg == null) return;
 
+            var modes = AvailableModes();
+
             if (!_visible)
             {
+                if (modes.Count == 0)
+                {
+                    Plugin.Logger.LogInfo("TwilightTimer: leaderboard cycle: no content mode available (subsegment and markers both disabled); staying hidden.");
+                    return;
+                }
                 _visible = true;
-                cfg.Layout.LeaderboardMode = "Subsegment";
-                Plugin.Logger.LogInfo("TwilightTimer: leaderboard shown in Subsegment mode.");
+                cfg.Layout.LeaderboardMode = modes[0];
+                Plugin.Logger.LogInfo($"TwilightTimer: leaderboard shown in {modes[0]} mode.");
                 return;
             }
 
-            bool markersMode = string.Equals(cfg.Layout.LeaderboardMode, "Markers", System.StringComparison.OrdinalIgnoreCase);
-            if (markersMode)
+            string current = cfg.Layout.LeaderboardMode;
+            int idx = IndexOfMode(modes, current);
+            if (idx < 0 || idx == modes.Count - 1)
             {
+                // Either the current mode is no longer available (disabled or
+                // unknown, so it sits outside the rotation) or it is the last
+                // available mode: the next press hides the board.
                 _visible = false;
                 Plugin.Logger.LogInfo("TwilightTimer: leaderboard hidden.");
             }
             else
             {
-                cfg.Layout.LeaderboardMode = "Markers";
-                Plugin.Logger.LogInfo("TwilightTimer: leaderboard switched to Markers mode.");
+                cfg.Layout.LeaderboardMode = modes[idx + 1];
+                Plugin.Logger.LogInfo($"TwilightTimer: leaderboard switched to {modes[idx + 1]} mode.");
             }
         }
 
@@ -101,7 +147,9 @@ namespace TwilightTimer
             if (_visible && ConfigService.Instance != null
                 && string.IsNullOrEmpty(ConfigService.Instance.Layout.LeaderboardMode))
             {
-                ConfigService.Instance.Layout.LeaderboardMode = "Subsegment";
+                var modes = AvailableModes();
+                if (modes.Count > 0)
+                    ConfigService.Instance.Layout.LeaderboardMode = modes[0];
             }
         }
 
@@ -187,10 +235,11 @@ namespace TwilightTimer
         private void DrawSubsegment(ConfigService cfg, float topY)
         {
             var mgr = SubsegmentManager.Instance;
-            // T7.5: the local subsegment leaderboard is suppressed for the whole
-            // match session (Enabled folds in MatchMode.Active); the shared HUD
-            // stays usable in Markers mode.
-            if (mgr == null || !mgr.Enabled) return;
+            // Gated on full availability (user-enabled AND not auto-disabled AND
+            // not match-suppressed): when subsegment is off — by settings, by a
+            // mechanism like the co-op client gate, or by a match (T7.5) — the
+            // mode draws nothing (R8.5.1.2).
+            if (mgr == null || !mgr.IsLeaderboardAvailable) return;
             var state = TimerCore.State;
             if (state == null) return;
             // During a level transition (LoadingLevel between levels) keep the
@@ -241,9 +290,7 @@ namespace TwilightTimer
         private void DrawMarkers(ConfigService cfg, float topY)
         {
             var mgr = MarkersManager.Instance;
-            if (mgr == null || !mgr.HasFeedData) return;
-            var settings = cfg.Settings;
-            if (settings == null || !settings.MarkersEnable) return;
+            if (mgr == null || !mgr.HasFeedData || !mgr.IsLeaderboardAvailable) return;
             var layout = cfg.Layout;
             var state = TimerCore.State;
             if (state == null) return;

@@ -8,10 +8,13 @@ namespace TwilightTimer
     /// The timer engine. A single polling MonoBehaviour drives all timing,
     /// segment, reset, validity, and tag logic each frame by reading public
     /// game fields. The only exceptions are the precise start/end boundary
-    /// hooks (see <see cref="RecordSegmentStart"/>/<see cref="RecordLevelPass"/>
-    /// and docs/ARCHITECTURE.md): they record the exact tick where the game
-    /// flips state inside its own physics step, which a poll can only observe
-    /// a tick late.
+    /// hooks (see <see cref="RecordSegmentStart"/> / <see cref="RecordLevelPass"/>
+    /// / <see cref="RecordLevelLeave"/> and docs/ARCHITECTURE.md): they record
+    /// the exact tick where the game flips state inside its own physics step,
+    /// which a poll can only observe a tick late. The segment-end tick is
+    /// latched either at the <c>Game.Fall</c> pass detection (legacy, the
+    /// default) or — under the "Use plcc timing standard" setting — when the
+    /// game leaves <c>PlayingLevel</c>.
     ///
     /// <see cref="FixedUpdate"/>: accumulation + state-transition detection
     /// (Appendix B) + per-tick tag rules on segment end.
@@ -45,7 +48,7 @@ namespace TwilightTimer
         private double _segmentStartPause;
 
         // Ring buffer of recent segment-start/end boundaries, exposed through
-        // 'hsr clock history' so repeated loads/passes can be checked for zero
+        // 'twitimer clock history' so repeated loads/passes can be checked for zero
         // tick jitter (TB-5).
         private const int BoundaryLogCapacityConst = 200;
         private static readonly List<string> BoundaryEntries = new List<string>();
@@ -70,6 +73,46 @@ namespace TwilightTimer
         /// </summary>
         public static bool HasProcessedCurrentPhysicsStep
             => Instance != null && Instance._lastFixedTime == Time.fixedTime;
+
+        /// <summary>
+        /// Whether the plcc timing standard is active (the "Use plcc timing
+        /// standard" setting): the segment-end tick is latched when the game
+        /// leaves <c>PlayingLevel</c> (<c>Game.BeginLoadLevel</c> /
+        /// <c>Game.AfterUnload</c>), matching the plcc Timer. When off (the
+        /// default), the legacy mechanism is used instead: the end tick is
+        /// latched at the <c>Game.Fall</c> pass detection. Reads the live
+        /// settings model so a panel/console toggle applies immediately,
+        /// without a reset or retry.
+        /// </summary>
+        private static bool UsePlccTimingStandard
+        {
+            get
+            {
+                var cfg = ConfigService.Instance;
+                return cfg != null && cfg.Settings != null && cfg.Settings.UsePlccTimingStandard;
+            }
+        }
+
+        /// <summary>
+        /// True while a run is in progress, i.e. the timer is running. The
+        /// "Use plcc timing standard" option selects which event ends a segment,
+        /// so changing it mid-run would let one run straddle two standards; it
+        /// is therefore locked for the whole run: the settings panel disables
+        /// the toggle and the dev console rejects
+        /// <c>twitimer set use_plcc_timing_standard</c>.
+        /// <para>
+        /// The whole-run window is <see cref="RunState.RealTimeActive"/>: it
+        /// starts with the run's first playable segment, stays true across
+        /// level-loading transitions and pauses (so a mid-campaign run cannot be
+        /// switched between levels either), and only clears when the run
+        /// completes or the player returns to the menu/lobby. A manual reset
+        /// also ends the run and releases the lock. This is only a guard against
+        /// switching the standard mid-run — the engine still re-reads the
+        /// setting every tick.
+        /// </para>
+        /// </summary>
+        public static bool IsTimingStandardLocked
+            => State != null && State.RealTimeActive;
 
         private void Awake()
         {
@@ -152,6 +195,13 @@ namespace TwilightTimer
             // Drain externally-enqueued actions (T1.4 marshaling).
             MainThreadQueue.Drain();
 
+            // Auto label tags (R3.10): the Co-op label follows the live game
+            // mode every frame — on during a multiplayer session
+            // (NetGame.isServer/isClient), off in single-player. Label tags are
+            // never persisted (EnabledTagsModel.Save filters them out) and carry
+            // no rule, so this only affects the enabled-tag display surfaces.
+            SyncAutoLabels();
+
             GameState gState = Game.instance != null ? Game.instance.state : GameState.Inactive;
 
             // Generic always-on validity check (R5.1): cheat codes.
@@ -159,9 +209,9 @@ namespace TwilightTimer
 
             // B.2 pause supplement (always on; runs here because FixedUpdate is
             // paused when timeScale=0). Pause time is wall-clock, the one
-            // non-tick game-time component (R1.8.3/TB-6). Once a pass boundary
+            // non-tick game-time component (R1.8.3/TB-6). Once the leave tick
             // has been latched the run's game clock is already frozen, so a
-            // pause in the short post-pass window must not extend it either.
+            // pause in the short post-leave window must not extend it either.
             if (!State.PendingEndTicks.HasValue
                 && SegmentLogic.ShouldAccumulatePause(gState, State.TimingActive))
             {
@@ -391,9 +441,10 @@ namespace TwilightTimer
             if (!State.InSegment)
                 return;
 
-            // TB-3: use the pass-zone hook's exact end tick when one was
-            // latched; otherwise (a mid-level quit, which records nothing) fall
-            // back to the polled tick.
+            // Use the exact leave tick latched by the authoritative leave hooks
+            // (Game.AfterUnload / Game.BeginLoadLevel) when one was recorded;
+            // otherwise fall back to the polled tick (e.g. a path that does not
+            // go through those methods).
             ulong endTicks = State.PendingEndTicks ?? State.PlayableTicks;
             double endPause = State.PendingEndTicks.HasValue ? State.PendingEndPause : State.PauseAccum;
             double end = GameClock.Seconds(endTicks, endPause);
@@ -539,10 +590,9 @@ namespace TwilightTimer
         // ── Accumulation (B.1) ─────────────────────────────────────────────
         private void Accumulate(Game game, GameState gState, AppSate aState)
         {
-            // Once the pass hook has latched the segment's exact end tick the
-            // game clock is frozen at it, even though the state may stay
-            // PlayingLevel for a few more physics steps while the game starts
-            // the load (TB-3).
+            // Once the authoritative leave hook has latched the segment's exact
+            // end tick the game clock is frozen at it, even though the state may
+            // stay PlayingLevel for the rest of the physics step.
             if (State.PendingEndTicks.HasValue)
                 return;
             if (SegmentLogic.ShouldAccumulateFixed(gState, aState, State.TimingActive))
@@ -684,6 +734,35 @@ namespace TwilightTimer
         }
 
         /// <summary>
+        /// Keep label-only tags (<see cref="TagLabels"/>, R3.10) in sync with the
+        /// live game mode. The Co-op label is enabled only while a multiplayer
+        /// session is active (<c>NetGame.isServer</c> or <c>NetGame.isClient</c>)
+        /// and removed as soon as the player is back in single-player. It carries
+        /// no rule and no validity flag (nothing in the rule pipeline references
+        /// it), and it is never persisted — this only turns the label on/off on
+        /// the enabled-tag display surfaces (HUD tags line, {category}).
+        /// Called every frame from <see cref="Update"/>.
+        /// </summary>
+        private void SyncAutoLabels()
+        {
+            var tags = _cfg != null ? _cfg.EnabledTags : null;
+            if (tags == null) return;
+            bool coop = CoopLabelOverride ?? (NetGame.isServer || NetGame.isClient);
+            if (coop)
+                tags.Enable(TagLabels.Coop);
+            else
+                tags.Disable(TagLabels.Coop);
+        }
+
+        /// <summary>
+        /// Session-only override for the Co-op auto label (R3.10), set by the
+        /// dev console ('twitimer tag label on|off|auto') so the label's display can
+        /// be tested without an actual multiplayer session (mirrors the 'twitimer
+        /// flags raise' test tool). Null = follow the live game mode (default).
+        /// </summary>
+        public static bool? CoopLabelOverride;
+
+        /// <summary>
         /// Public entry point used by the in-game dev console to perform the
         /// same full-run reset as the reset key.
         /// </summary>
@@ -760,25 +839,64 @@ namespace TwilightTimer
         }
 
         /// <summary>
-        /// Latch the authoritative segment-end tick after the game has detected
-        /// a genuine level pass (<c>Game.Fall</c> taking the <c>passedLevel</c>
-        /// branch, R1.4.2). The tick is the step's exact index, including the
-        /// pass step itself ("终点含最后一帧", TB-4); the poll then freezes
-        /// accumulation at it and records the segment on the observed state
-        /// flip. Suppressed under <c>Retrying</c> (R6) and outside a segment, so
-        /// an abandoned attempt never ends a segment (TB-7).
+        /// Latch the completion flag when the game detects a genuine level pass
+        /// (<c>Game.Fall</c> taking the <c>passedLevel</c> branch, R1.4.2) and
+        /// log the pass step for diagnostics.
+        /// <para>
+        /// Under the plcc timing standard it only sets the completion flag; the
+        /// segment end tick is latched separately by <see cref="RecordLevelLeave"/>
+        /// from the authoritative leave hooks. In the legacy mode (the default,
+        /// plcc standard off) it is the authoritative segment end: the exact
+        /// end tick is latched here, at the <c>Game.Fall</c> pass detection.
+        /// </para>
+        /// <para>
+        /// Both modes still log a <c>pass</c> boundary line at the
+        /// <c>Game.Fall</c> tick (under the plcc standard it is emitted before
+        /// the already-latched early return, i.e. it is pure observation). Only
+        /// in the legacy mode is that tick the segment end; under the plcc
+        /// standard the end is the later <c>leave</c> tick, so the
+        /// <c>pass</c> → <c>leave</c> delta is the render-frame delay documented
+        /// in docs/ARCHITECTURE.md and can be read from
+        /// <c>twitimer clock history</c>.
+        /// </para>
+        /// Suppressed under <c>Retrying</c> (R6) and outside a segment, so an
+        /// abandoned attempt never ends a segment (TB-7).
         /// </summary>
         public static void RecordLevelPass()
         {
-            var core = Instance;
             var st = State;
-            if (core == null || st == null)
+            if (st == null)
                 return;
             if (!st.InSegment || st.Retrying)
                 return;
+
+            if (UsePlccTimingStandard)
+            {
+                // plcc standard: only the completion flag; the end tick is
+                // latched by the authoritative leave hooks (RecordLevelLeave).
+                // The Game.Fall tick is recorded unconditionally (before the
+                // already-latched early return) as a pure observation: it does
+                // not decide the segment end, but 'twitimer clock history' then
+                // shows pass (Game.Fall) -> leave (left PlayingLevel) -> end, so
+                // the render-frame delay between the pass detection and the game
+                // leaving PlayingLevel is directly visible and measurable.
+                // The completion flag is normally already latched here by
+                // Game.EnterPassZone (LatchLevelPassed), so this line, not the
+                // one below, is the one that actually fires.
+                LogBoundary($"pass  level={st.CurrentLevelNumber} tick={st.PlayableTicks} step={GameClock.CurrentTick} processed={HasProcessedCurrentPhysicsStep}");
+                if (st.LevelPassed)
+                    return;
+                st.LevelPassed = true;
+                return;
+            }
+
+            // Legacy timing (default): Game.Fall is the authoritative segment
+            // end. The tick is the step's exact index, including the pass step
+            // itself ("终点含最后一帧", TB-4); the poll then freezes
+            // accumulation at it and records the segment on the observed state
+            // flip.
             if (st.PendingEndTicks.HasValue)
                 return;
-
             st.LevelPassed = true;
             // The hook can run before or after this plugin's FixedUpdate within
             // the same physics step. When it runs first, the pass step has not
@@ -802,14 +920,74 @@ namespace TwilightTimer
 
         /// <summary>
         /// Latch only the completion flag (used by the <c>Game.EnterPassZone</c>
-        /// postfix, R1.4.2). The segment's end tick is recorded later, at the
-        /// authoritative <c>Game.Fall</c> pass detection.
+        /// postfix, R1.4.2).
         /// </summary>
         public static void LatchLevelPassed()
         {
             var st = State;
-            if (st != null && st.InSegment)
-                st.LevelPassed = true;
+            if (st == null || !st.InSegment || st.LevelPassed)
+                return;
+            st.LevelPassed = true;
+            LogBoundary($"zone  level={st.CurrentLevelNumber} tick={st.PlayableTicks} step={GameClock.CurrentTick}");
+        }
+
+        /// <summary>
+        /// Latch the exact segment-end tick at the authoritative moment the game
+        /// runs <c>state = LoadingLevel</c> / <c>state = Inactive</c>
+        /// (<c>Game.BeginLoadLevel</c>, whose <c>LoadLevel</c> coroutine assigns
+        /// the state before its first yield, and <c>Game.AfterUnload</c>), i.e.
+        /// the same "the game left <c>PlayingLevel</c>" event the plcc Timer
+        /// uses. Recording the tick from these methods — rather than from the
+        /// physics step that later observes the state flip — makes the end
+        /// boundary independent of Unity script execution order and of the poll
+        /// cadence. This is only authoritative under the plcc timing standard
+        /// (the "Use plcc timing standard" setting); in the legacy mode it is a
+        /// no-op because <see cref="RecordLevelPass"/> latches the end tick at
+        /// the <c>Game.Fall</c> pass detection instead. Suppressed under
+        /// <c>Retrying</c> (R6) and outside a segment so an abandoned attempt
+        /// never ends a segment (TB-7).
+        /// </summary>
+        public static void RecordLevelLeave()
+        {
+            // Legacy timing (default) latches the segment end at the Game.Fall
+            // pass detection (RecordLevelPass); the leave hooks are only
+            // authoritative under the plcc timing standard.
+            if (!UsePlccTimingStandard)
+                return;
+
+            var st = State;
+            if (st == null || !st.InSegment || st.Retrying)
+                return;
+            if (st.PendingEndTicks.HasValue)
+                return;
+
+            var game = Game.instance;
+            if (game == null)
+                return;
+
+            GameState now = game.state;
+            // Mirror SegmentLogic.IsSegmentEnd: the segment ends when the game
+            // leaves PlayingLevel for a load, or for Inactive while playing
+            // locally.
+            bool leavesPlaying = now == GameState.LoadingLevel
+                || (now == GameState.Inactive && NetGame.isLocal);
+            if (!leavesPlaying)
+                return;
+
+            ulong endTicks = st.PlayableTicks;
+            // Game.AfterUnload can run synchronously inside Game.Fall, i.e.
+            // inside the very physics step that is ending (the Workshop /
+            // EditorPick path). When this plugin's FixedUpdate has not yet
+            // processed that step, it was still a playable PlayingLevel frame,
+            // so count it explicitly; accumulation is frozen from here.
+            if (!HasProcessedCurrentPhysicsStep)
+                endTicks++;
+
+            st.PlayableTicks = endTicks;
+            st.PendingEndTicks = endTicks;
+            st.PendingEndPause = st.PauseAccum;
+            st.GameTimeSeconds = GameClock.Seconds(st.PlayableTicks, st.PauseAccum);
+            LogBoundary($"leave level={st.CurrentLevelNumber} tick={endTicks} state={now} step={GameClock.CurrentTick} processed={HasProcessedCurrentPhysicsStep}");
         }
 
         private void DoFullReset(bool keepLastValues, bool keepLastRun = false)

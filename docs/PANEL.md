@@ -17,7 +17,7 @@ TwilightTimer saves.
 
 ## About
 
-- **Plugin identity** — the plugin name (`HSRTimer`) and the current version
+- **Plugin identity** — the plugin name (`TwilightTimer`) and the current version
   number, on the first two lines.
 - **License** — the first two lines of the MIT license (`MIT License`,
   `Copyright (c) 2026 TwilightCup`). This is legal text and is **not**
@@ -45,7 +45,13 @@ TwilightTimer saves.
 
 ## General
 
-- **Timing** — `auto_reset`,
+- **Timing** — the first row is the timing standard toggle
+  (`use_plcc_timing_standard`, "Use plcc timing standard"): off by default,
+  keeping the previous timing (the segment ends at the game's pass detection);
+  on switches to the plcc Timer standard (the segment ends when the game leaves
+  the level). The toggle is disabled for the whole run in progress (R1.4.2a) and
+  its note reads "Locked while a run is in progress…" — complete the run, return
+  to the menu, or reset it to change the option. Then `auto_reset`,
   `restart_clears_forgivable` (clears forgivable flags on a pause-menu
   restart; see [CONFIG.md](CONFIG.md)), and the retry target override
   (`retry_level_override_enabled` + `retry_level_override`). When the override
@@ -68,11 +74,13 @@ TwilightTimer saves.
   deleted. See [CONFIG.md](CONFIG.md).
 - **Keybinds** — reset / retry / settings / leaderboard mode-cycle keys. The
   leaderboard mode-cycle key cycles the shared leaderboard HUD through hidden →
-  Subsegment → Markers → hidden (disabled for the whole match session, T7.6).
-  To rebind: click the field, then press the
-  desired key. Pure modifier presses are ignored. Mouse side buttons
-  (`Mouse3`–`Mouse6`) can also be bound; mouse left/right buttons remain
-  reserved for normal UI use.
+  the available content modes → hidden; a mode whose module is disabled (user
+  setting or an auto-disable mechanism, e.g. the co-op client gate) is skipped,
+  so with subsegment off the cycle is only hidden ↔ Markers. The key is disabled
+  for the whole match session (T7.6). To rebind: click the field, then press the
+  desired key. Pure modifier presses are ignored.
+  Mouse side buttons (`Mouse3`–`Mouse6`) can also be bound; mouse left/right
+  buttons remain reserved for normal UI use.
 
 ## Interface
 

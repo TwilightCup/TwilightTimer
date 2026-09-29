@@ -9,9 +9,10 @@ namespace TwilightTimer
     /// three groups:
     ///   - unforgivable (permanent until game restart),
     ///   - forgivable (clearable on retry),
-    ///   - soft (counted, shown in normal HUD text, only flashing red on the
-    ///     triggering frame; cleared on one-key retry, but not by pause-menu
-    ///     restart; removed by a full timer reset).
+    ///   - soft (counted, shown on one shared HUD line in normal HUD text, with
+    ///     only the newly triggered flag's own segment flashing red; cleared on
+    ///     one-key retry, but not by pause-menu restart; removed by a full timer
+    ///     reset).
     /// Reasons only accumulate; they never auto-clear except via
     /// <see cref="ClearForgivable"/> / <see cref="ClearAll"/>.
     /// </summary>
@@ -72,7 +73,7 @@ namespace TwilightTimer
         /// Record a reason. Hard reasons are idempotent and fire
         /// <see cref="OnRaised"/> on a new one; soft reasons instead increment
         /// their trigger count and stamp the flash time so the HUD can flash
-        /// the line once per new trigger.
+        /// that flag's segment once per new trigger.
         /// </summary>
         public void Raise(InvalidReason reason)
         {
