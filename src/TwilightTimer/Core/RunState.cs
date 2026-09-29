@@ -47,10 +47,8 @@ namespace TwilightTimer
 
         /// <summary>
         /// Exact end tick of the current segment, latched by the authoritative
-        /// boundary hook, or null when the end has not been observed yet. Under
-        /// the plcc timing standard the latch comes from the leave hooks
-        /// (<c>Game.AfterUnload</c> / <c>Game.BeginLoadLevel</c>); in the legacy
-        /// mode it comes from the <c>Game.Fall</c> pass-zone boundary hook.
+        /// boundary hook, or null when the end has not been observed yet. The
+        /// latch comes from the <c>Game.Fall</c> pass-zone boundary hook.
         /// Once set, the poll freezes accumulation so the segment ends on the
         /// hooked tick rather than on the frame the poll happens to notice the
         /// state flip.
@@ -403,8 +401,7 @@ namespace TwilightTimer
         /// cache, e.g. across a Game.instance null window).
         /// <para><paramref name="endTicks"/> is the segment's exact end tick:
         /// the authoritative boundary hook's value when one was latched (TB-3,
-        /// the <c>Game.Fall</c> pass hook in the legacy mode, the leave hooks
-        /// under the plcc timing standard), else the polled
+        /// the <c>Game.Fall</c> pass hook), else the polled
         /// <see cref="PlayableTicks"/>. The run total is normalized to it so a
         /// pass that the poll had not yet counted is still included.</para>
         /// </summary>

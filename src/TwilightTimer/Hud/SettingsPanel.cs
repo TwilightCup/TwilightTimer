@@ -396,20 +396,6 @@ namespace TwilightTimer
             }
 
             Section(loc.Get("PANEL_TIMING"));
-            // Top of the timing section: the timing standard picker. Default
-            // off keeps the legacy boundary (segment ends at the Game.Fall pass
-            // detection); on switches to the plcc Timer standard (segment ends
-            // when the game leaves PlayingLevel). The option decides which event
-            // ends a segment, so it is disabled for the whole run in progress.
-            // No description label is drawn for the option; only the locked
-            // state gets an explanatory line.
-            bool timingStandardLocked = TimerCore.IsTimingStandardLocked;
-            bool timingStandardPrevEnabled = GUI.enabled;
-            GUI.enabled = timingStandardPrevEnabled && !timingStandardLocked;
-            s.UsePlccTimingStandard = Toggle(loc.Get("SETTINGS_USE_PLCC_TIMING_STANDARD"), s.UsePlccTimingStandard);
-            GUI.enabled = timingStandardPrevEnabled;
-            if (timingStandardLocked)
-                GUILayout.Label(loc.Get("SETTINGS_USE_PLCC_TIMING_STANDARD_LOCKED"), _small);
             // T2.3: during a match the settings that conflict with the match
             // rules (T5/T7) are view-only — AutoReset is superseded by the
             // round tracker (T7.2). Pause always counts and menu/lobby never

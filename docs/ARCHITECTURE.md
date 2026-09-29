@@ -29,10 +29,9 @@ hooks (`NarrativeBlock.Play` and `SubtitleManager.PlayNarrative`, see
 [VOICELINE.md](VOICELINE.md)), the pause-menu restart hook
 (`PauseMenu.RestartClick`, which fires the `restart_clears_forgivable` option),
 the Jumpless jump-key suppression (`HumanControls.HandleInput`, R3.5.3), and
-the timing-boundary hooks (`Game.AfterLoad` for the start tick;
-`Game.BeginLoadLevel` / `Game.AfterUnload` for the end tick under the plcc
-timing standard; `Game.Fall` for the end tick in the legacy mode (the default);
-`Game.EnterPassZone` / `Game.Fall` to latch the completion flag — R1.11/TB-3).
+the timing-boundary hooks (`Game.AfterLoad` for the start tick; `Game.Fall` for
+the end tick; `Game.EnterPassZone` / `Game.Fall` to latch the completion flag —
+R1.11/TB-3).
 The last one is a deliberate exception: a pollable field *does* exist
 (`HumanControls.jump`), but enforcement is a *write* into a chain the game both
 writes and consumes within one physics frame (`NetPlayer.PreFixedUpdate` →
@@ -76,7 +75,7 @@ Patches/
   NarrativeBlockPatches.cs    postfix on NarrativeBlock.Play
   SubtitleManagerPatches.cs   postfix on SubtitleManager.PlayNarrative
   PauseMenuPatches.cs         postfix on PauseMenu.RestartClick / LoadClick
-  TimingBoundaryPatches.cs    precise segment start/end ticks + completion-flag latches (Game.AfterLoad / BeginLoadLevel / AfterUnload / EnterPassZone / Fall, R1.11)
+  TimingBoundaryPatches.cs    precise segment start/end ticks + completion-flag latches (Game.AfterLoad / EnterPassZone / Fall, R1.11)
   HumanControlsPatches.cs     postfix on HumanControls.HandleInput (Jumpless enforcement)
 Hud/
   TimerHud.cs             IMGUI panel (R2)
@@ -161,53 +160,35 @@ The engine's game clock is an **integer physics-tick counter**, not a
   also writes the `RunState.GameTimeSeconds` cache each tick for cheap
   read-only consumers.
 
-**Why the boundary hooks exist.** Both segment boundaries are `Game.state`
-flips that the polling loop can only observe a step late, so
-`Patches/TimingBoundaryPatches.cs` records the exact tick at the authoritative
-assignment:
+**Why the boundary hooks exist.** Both segment boundaries are observed by the
+polling loop a step late, so `Patches/TimingBoundaryPatches.cs` records the
+exact tick at the authoritative assignment:
 
 - **Start** — `Game.AfterLoad` sets `state = PlayingLevel`; its postfix latches
   `SegmentStartTicks`.
-- **End** — which authoritative event provides the end tick depends on the
-  `use_plcc_timing_standard` setting (default off, R1.4.2):
-  - **Legacy (default)** — `Game.Fall` (the pass detection) latches
-    `PendingEndTicks` at the exact pass step, including the pass frame itself.
-    This is the pre-4cb5672 behavior; it can differ from the plcc Timer by the
-    unload delay (one or two ticks).
-  - **plcc timing standard (on)** — `Game.BeginLoadLevel` (whose `LoadLevel`
-    coroutine sets `state = LoadingLevel` before its first yield) and
-    `Game.AfterUnload` (sets `state = Inactive`) latch `PendingEndTicks` at the
-    moment the game leaves `PlayingLevel` — the same event the plcc Timer uses.
-    Because `Game.AfterUnload` can run synchronously inside `Game.Fall` (the
-    Workshop / EditorPick path), the latch also counts the current physics step
-    when this plugin's `FixedUpdate` has not processed it yet.
+- **End** — `Game.Fall` (the pass detection) latches `PendingEndTicks` at the
+  exact pass step, including the pass frame itself (R1.4.2). The pass is
+  evaluated inside the game's physics step, so a later poll can only observe it
+  one or more ticks late; the recorded tick therefore differs from the moment
+  the game finally leaves `PlayingLevel` by the unload delay (one or two ticks).
 
-Under the plcc standard the `Game.EnterPassZone` / `Game.Fall` hooks only latch
-the `LevelPassed` completion flag, because `Game.Fall` may clear `passedLevel`
-for Workshop/EditorPick before the poll can read it (in the legacy mode
-`Game.Fall` additionally latches the end tick). The hooks only record ticks and
+The `Game.EnterPassZone` / `Game.Fall` hooks also latch the `LevelPassed`
+completion flag, because `Game.Fall` may clear `passedLevel` for
+Workshop/EditorPick before the poll can read it. The hooks only record ticks and
 set flags — every transition, segment, reset, and validity decision still goes
 through the single polling loop.
 
-**The `pass` boundary line is logged in both modes.** `RecordLevelPass` always
-emits a `pass` boundary line at the `Game.Fall` tick; under the plcc standard
-that line is emitted *before* the already-latched early return, so it is pure
-observation and never decides the segment end. `twitimer clock history` therefore
-shows `pass` (the `Game.Fall` detection) → `leave` (the game left
-`PlayingLevel`) → `end` under the plcc standard, and the `pass` → `leave` tick
-delta is exactly the render-frame delay the plcc Timer's criterion adds over the
-legacy boundary (`Game.PassLevel` yields one frame before `StartNextLevel` →
-`Game.BeginLoadLevel` sets `state = LoadingLevel`; see
-[TESTS.md](TESTS.md) for the measured values). If the completion flag was
-already latched by `Game.EnterPassZone`, this observation line is the only
-`pass` line that fires.
+**The `pass` boundary line.** `RecordLevelPass` emits a `pass` boundary line at
+the `Game.Fall` tick; that tick is the segment end, so `twitimer clock history`
+reports it (with `src=hook`) as the boundary the poll consumed. A `zone` line
+marks `Game.EnterPassZone`, which normally latches `LevelPassed` before
+`Game.Fall` runs.
 
 | Boundary | Hook | Recorded value |
 |---|---|---|
 | Segment start (R1.2.2) | `Game.AfterLoad` postfix | `SegmentStartTicks` (consumed by `StartSegment`) |
-| Segment end (R1.4.1), legacy (default) | `Game.Fall` postfix | `PendingEndTicks` — the pass step's exact tick, including the pass frame |
-| Segment end (R1.4.1), plcc standard | `Game.BeginLoadLevel` / `Game.AfterUnload` postfix | `PendingEndTicks` — "the game left `PlayingLevel`", the plcc Timer criterion |
-| Pass flag + `pass` tick (R1.4.2) | `Game.EnterPassZone` postfix / `Game.Fall` prefix+postfix | `LevelPassed` latch, and the diagnostic `pass` boundary line at the `Game.Fall` tick (completion flag only under the plcc standard; the line is observation, not the end) |
+| Segment end (R1.4.1) | `Game.Fall` postfix | `PendingEndTicks` — the pass step's exact tick, including the pass frame |
+| Pass flag + `pass` tick (R1.4.2) | `Game.EnterPassZone` postfix / `Game.Fall` prefix+postfix | `LevelPassed` latch, and the diagnostic `pass` boundary line at the `Game.Fall` tick |
 
 ### Real Time clock (R1.10)
 
