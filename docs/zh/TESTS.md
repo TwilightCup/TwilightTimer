@@ -40,12 +40,12 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 | `twitimer hud [on\|off\|toggle\|status]` | 控制计时 HUD 的显示 |
 | `twitimer panel [open\|close\|toggle\|status]` | 控制设置面板 |
 | `twitimer leaderboard [cycle\|show\|hide\|mode <Subsegment\|Markers>\|status]` | 控制排行榜 HUD |
-| `twitimer layout [status\|row ...\|text ...\|get <key>\|set <key> <value>]` | 查看 / 编辑 HUD 布局 |
-| `twitimer tag [list\|enable <id>\|disable <id>\|set <id> <on\|off>]` | 开关启用的标签规则 |
+| `twitimer layout [status\|row ...\|column ...\|text ...\|get <key>\|set <key> <value>]` | 查看 / 编辑 HUD 布局(列内为 1 基行位置) |
+| `twitimer tag [list\|label <status\|on\|off\|auto>\|enable <id>\|disable <id>\|set <id> <on\|off>]` | 开关启用的标签规则;查看/强制自动 Co-op 标签 |
 | `twitimer lang [list\|set <code>\|reload\|current]` | 管理本地化 |
 | `twitimer preset [list\|current\|create <name>\|apply [name]\|save\|delete <name>]` | 管理预设(R11) |
-| `twitimer sub [status\|entries\|clear]` | 查看 / 清空分段模块 |
-| `twitimer marker [list\|feed\|add ...\|remove <id>\|toggle <id>\|pb <ms>\|pbclear\|clear\|save\|reload]` | 查看 / 编辑标记(R10) |
+| `twitimer sub [status\|entries\|clear\|clientmode <status\|on\|off\|auto>]` | 查看 / 清空分段模块;查看 / 强制合作客机门控 |
+| `twitimer marker [list\|feed\|add ...\|remove <id>\|toggle <id>\|clientmode <status\|on\|off\|auto>\|pb <ms>\|pbclear\|clear\|save\|reload]` | 查看 / 编辑标记(R10);查看 / 强制合作 PB 角色 |
 | `twitimer flags [list\|raise <Reason>\|clear [forgivable\|soft\|all]]` | 查看 / 修改有效性标记(R5) |
 | `twitimer lc [status\|restart]` | 查看 LevelCollections 集成或触发 `lc restart` |
 | `twitimer config [path\|files\|source [status\|hsrtimer\|twilighttimer\|toggle]]` | 打印 TwilightTimer 配置路径,或切换配置来源目录 |
@@ -60,7 +60,7 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 
 - `auto_reset`、`restart_clears_forgivable`、`retry_min_dwell`
 - `retry_level_override_enabled`、`retry_level_override`
-- `show_hud`、`show_real_time`、`show_wake_up_time`
+- `show_hud`
 - `only_record_first_wake_up_time`、`center_loading_saving`、`language`
 - `reset_key`、`retry_key`、`menu_key`
 - `subsegment_enable`、`subsegment_pb_path`、`subsegment_load_path`、
@@ -98,16 +98,23 @@ twitimer pass real              # 传送到判定箱内,让游戏自身完成通
 `twitimer status` 应显示最终分段时间,且(整局最后一关)`lastRun` 有值。它需要一个带本地玩家的活跃分段,
 对客户端 / 重放播放无效。**分段与标记 PB 故意不写入**(测试性通关),真实 PB 文件不受影响。
 
+**上关RT(R1.10.7)。** 过关后,`twitimer status` 应显示定格的 `prevRt=`(该关结束时
+的现实时间),HUD 的 `Prev Rt` 行(中文 `上关RT`)更新为同一值 —— 这是整局累计的
+现实时间,而非该关自身用时。首个关卡完成前为 `--`(未设置)。`twitimer reset` 与退出到
+菜单会清零它;`twitimer retry` 保留。
+
 `twitimer pass real` 走真实的触发链而不是强行设置标志:它清零玩家动量(所有身体部位的线速度与角速度)、
 松开双手抓取,并把本地玩家传送到当前关卡 `LevelPassTrigger`(通关判定箱)中心。之后游戏自身流程接管 ——
 判定箱闩锁 `passedLevel`,玩家落入下方的 `FallTrigger`,`Game.Fall` 完成通关。PB 抑制方式与默认模式完全一致。
 若命令报告 `LevelPassed` 未被闩锁,说明关卡的通关触发箱无法进入(碰撞体 / 标签 / 布局问题)。
 
-**边界确定性(R1.11)。** `twitimer clock` 打印原始整数 tick 时钟(`playableTicks`、`segmentStartTicks`、`pendingEndTicks` 等)。`twitimer clock history` 列出每次分段起止 tick:连续载入 + 通关同一关卡 50 次,相同操作下的 `dur=`(终点 tick − 起点 tick)必须**完全一致**(零 ±1 抖动)。测量前用 `twitimer clock clear` 清空历史。
+**边界确定性(R1.11)。** `twitimer clock` 打印原始整数 tick 时钟(`playableTicks`、`segmentStartTicks`、`pendingEndTicks` 等)。`twitimer clock history` 列出每次分段起止 tick。两个边界都由权威 hook 锁存,不依赖轮询节奏或 Unity 脚本执行顺序:`load` 是 `Game.AfterLoad` 起点 tick,`pass` 行(`Game.Fall` 通关检测)携带锁存的终点 tick,含通过帧本身。
 
-每条 `end` 记录带两个诊断字段:`src=hook|poll` 表示终点 tick 是由精确的 `Game.Fall` 边界 hook 锁定(真实通关)还是由轮询记录(中途退出);`step=` 是观察到该边界的全局物理帧。另有一条 `pass` 行标记权威过关 tick。二者合起来说明:**过关到状态翻转之间的物理帧没有被计入分段** —— 这正是旧版 ±1 抖动的来源。
+连续载入 + 通关同一关卡 50 次,相同操作下的 `dur=`(终点 tick − 起点 tick)必须**完全一致**(零 ±1 抖动)。测量前用 `twitimer clock clear` 清空历史。每条 `end` 记录在使用锁存 tick 时带 `src=hook`,`step=` 是轮询消费该边界的全局物理帧;因此分段时间不依赖轮询时机。
 
-起点侧同样成对出现:`load` 是 `Game.AfterLoad` hook 帧(权威分段起点),紧随其后的 `start` 行是轮询消费该闩锁的结果。`start` 的 tick 等于 `load` 的 tick 而 `step=` 更大,即证明起点边界不再取决于轮询何时发现它。
+`pass` 行是 `Game.Fall` 通关检测的 tick(`processed=` 表示本插件的 `FixedUpdate` 是否已处理该物理帧),该 tick 就是分段终点。`zone` 行标记 `Game.EnterPassZone`,它通常在 `Game.Fall` 之前就锁存 `LevelPassed`。
+
+起点侧同理:`load` 是 `Game.AfterLoad` hook 帧(权威分段起点),紧随其后的 `start` 行是轮询消费该闩锁的结果。`start` 的 tick 等于 `load` 的 tick 而 `step=` 更大,即证明起点边界不再取决于轮询何时发现它。
 
 ### 2. 有效性标记(R5)
 
@@ -116,12 +123,15 @@ twitimer flags list
 twitimer flags raise CheatCode            # 不可原谅
 twitimer flags raise CheckpointSkip       # 可原谅
 twitimer flags raise Ec                   # 软标记,计数递增
+twitimer flags raise Ssg                  # 软标记(Glitchless),计数递增
+twitimer flags raise PropFly              # 软标记(Glitchless),计数递增
+twitimer flags raise Footsie              # 软标记(Glitchless),计数递增
 twitimer flags clear forgivable
 twitimer flags clear soft
 twitimer flags clear all
 ```
 
-`twitimer status` 的 `flags:` 行应显示硬性原因,软标记显示为 `Ec xN`。
+`twitimer status` 的 `flags:` 行应显示硬性原因,软标记显示为 `Ec xN` / `Ssg xN` 等。
 
 ### 3. 标签 / 类别(R3)
 
@@ -137,6 +147,23 @@ twitimer status          # 会列出已启用的标签
 
 标签改动会立即持久化到 `tags.ini`。
 
+**自动标签 `Co-op`(R3.10)。** `twitimer tag list` 会在独立的 `labels (auto):` 行中列出标签型标签及其实时状态 —— 仅在多人会话期间(`twitimer status` 中的 `server=` / `client=`)显示 `Co-op [on]`,单人模式下为 `[off]`。该标签无法像规则标签一样手动开关:
+
+```text
+twitimer tag set Co-op on      # 会被拒绝:"is an auto label ... cannot be toggled manually"
+```
+
+无需真实多人会话即可测试标签显示,可用 `twitimer tag label` 强制开关(仅本次会话有效;`auto` 恢复按多人模式自动):
+
+```text
+twitimer tag label status      # effective / net / override
+twitimer tag label on          # 强制开启(HUD"规则标签"行与 {category} 显示 "Co-op")
+twitimer tag label off
+twitimer tag label auto        # 恢复自动(仅在多人会话期间开启)
+```
+
+验证真实周期:主持或加入合作游戏 → `twitimer tag list` 显示 `Co-op [on]`,且 HUD 的"规则标签"行 / `{category}` 模板变量包含 "多人"(中文界面;英文界面为 "Co-op");离开会话 → 变回 `[off]`。该标签从不持久化:`twitimer get all`(tags 段)与 `tags.ini` 中永远不会有 `Co-op`。
+
 ### 4. HUD / 布局(R2)
 
 ```text
@@ -144,16 +171,33 @@ twitimer hud off
 twitimer hud on
 twitimer layout status
 twitimer layout row list
-twitimer layout row add CurrentState
-twitimer layout row remove 5
+twitimer layout row add 1 CurrentState
+twitimer layout row add 1 CurrentState 2
+twitimer layout row remove 1 2
+twitimer layout row add 2 RealTime
+twitimer layout row add 2 PrevRt
+twitimer layout row clear 2
+twitimer layout column list
+twitimer layout column new
+twitimer layout row add 4 WakeUpTime
+twitimer layout column remove 4
 twitimer layout text add 20 400 "Hello {gametime}"
 twitimer layout text list
+twitimer layout text set 0 x 320
+twitimer layout text set 0 y 240
+twitimer layout text set 0 font_size 24
+twitimer layout text set 0 text "Level: {category}"
+twitimer layout text set 0 color_a 00FF00FF
+twitimer layout text set 0 color_b 0000FFFF
+twitimer layout text remove 0
 twitimer layout set font_size 24
 twitimer layout set offset_x 30
 twitimer layout set color_a FF0000FF
 ```
 
-HUD 应在下一帧生效,且改动持久化到 `layout.ini`。
+HUD 应在下一帧生效,且改动持久化到 `layout.ini`。`layout.ini` 的 `[column.N]` 键是 1 基行位置。`PrevRt` 是 `twitimer layout row add` 的合法行类型(上一关的现实时间快照;首关完成前显示 `--:--`),`LastRun` 与 `WakeUpTime` 同样是普通行 —— 所有行类型现在都是普通列行,`show_real_time` / `show_wake_up_time` 不再是设置(`twitimer set` 不再列出它们)。`twitimer layout row add <column> <type> [position]` 省略位置时追加到末尾;`twitimer layout column new` 追加空列,`twitimer layout column remove <n>` 删除一列。`twitimer layout text set <index> <x|y|text|font_size|color_a|color_b> <value>` 编辑已有自定义文本的单个字段(text 值可含空格)。
+
+设置面板的 **界面** 页与上述编辑器一致:顶部是 **居中加载/保存**,然后 **计时器HUD** 按钮(英文 `Timer HUD`)进入子页面,内含 **HUD 通用设置**(显示计时器面板、偏移、字号、颜色,以及“仅记录第一次起身时间”)、每列一个可折叠的 **第 N 列** 下拉(逐行类型带整数**位置**输入框:`0` = 隐藏,`N > 0` = 第 N 行)、每列一个 **删除** 按钮(需确认),以及底部的 **新建列** 按钮。同一页还有 **排行榜** 按钮(进入共享排行榜 HUD 子页面:内容模式、HUD 字号/偏移、条目颜色、标记时间显示,以及 subsegment 资料开关)与 **自定义文本** 按钮(英文 `Custom Text`,进入子页面:每条自定义文本为一个可折叠下拉,含内容输入框、字号滑杆、横向/纵向偏移、颜色 A/B 与 **删除** 按钮(需确认),底部为 **新建文本** 按钮)。所有子页面顶部都有 **返回** 按钮。
 
 ### 5. 设置面板 / 常规设置
 
@@ -198,12 +242,14 @@ twitimer sub entries
 twitimer sub clear
 ```
 
-`twitimer sub status` 打印启用标志、路径、多局状态与当前排行榜条目数。
+`twitimer sub status` 打印启用标志、合作门控状态、路径、多局状态与当前排行榜条目数。
 `twitimer sub entries` 列出每个已加载参考及其最新结算的差值。
 
 `twitimer sub status` 同时报告比赛门控:
 `enable=<用户设置> matchSuppressed=<bool> effective=<bool>
-samplingAllowedForLevel=<bool>`。模块实际遵循的是 `effective`。
+samplingAllowedForLevel=<bool>`。模块实际遵循的是 `effective`。与自动禁用接口一致
+(R8.5.1.5),比赛激活会登记为 `match` 来源,因此同时显示
+`autoDisabled=on autoReasons=match`。
 
 **比赛抑制(T7.5 / R8.9)。** 比赛激活期间本地分段对比会自动禁用:
 
@@ -220,11 +266,25 @@ twitimer sub status              # enable=true matchSuppressed=false; 从下一�
 该状态。先进入一个带有参考数据的关卡(见本节):分段排行榜在 `match enter` 前显示、
 进入后消失,退出比赛并开始下一关后恢复。任何时刻被抑制过的关卡都不得写入 PB。
 
+**合作门控(R8.10)。** 作为多人客机时模块整体禁用(`twitimer sub status` 显示 `active=off`、`coopClientGate=on`);作为主机时正常运行,且只使用自己(主机)的角色判定。无需真实客机会话,可用 `twitimer sub clientmode` 强制门控(仅本次会话有效;`auto` 恢复):
+
+```text
+twitimer sub clientmode status    # effective / net / override
+twitimer sub clientmode on        # 模拟为合作客机 -> 禁用 subsegment
+twitimer sub clientmode off       # 模拟为主机 / 单人 -> 正常
+twitimer sub clientmode auto      # 恢复自动(仅 NetGame.isClient 时禁用)
+```
+
+验证:`twitimer sub clientmode on` 后 `twitimer sub status` 显示 `active=off, coopClientGate=on`(以及新的自动禁用字段 `userEnabled=on autoDisabled=on autoReasons=coop-client`),关卡内排行榜不再显示任何 subsegment 内容;`twitimer sub clientmode off` 恢复采样 / 检测。真实合作会话中,客机端会自动呈现相同行为。
+
+**用户禁用 vs 自动禁用(R8.5.1.5)。** `twitimer sub status` 把用户的 `Subsegment.Enable` 设置(`enable` / `userEnabled`)与自动禁用来源(`autoDisabled` / `autoReasons`)分开报告。例如 `twitimer set subsegment_enable false` 得到 `userEnabled=off autoDisabled=off`,而 `twitimer sub clientmode on` 得到 `userEnabled=on autoDisabled=on autoReasons=coop-client`——两个维度相互独立,任一者都会使模块处于 `active=off`。
+
 ### 8. 标记(R10)
 
 进入关卡后:
 
 ```text
+twitimer marker status
 twitimer marker list
 twitimer marker add range "Test Box"          # 使用玩家位置,2 米盒子
 twitimer marker add checkpoint "CP1" 1
@@ -237,9 +297,22 @@ twitimer marker reload
 twitimer marker clear
 ```
 
+`twitimer marker status` 报告模块的启用 / 可用状态:用户的 `Markers.Enable` 设置(`enable` / `userEnabled`)、当前生效的自动禁用来源(`autoDisabled` / `autoReasons`,目前没有)、合并后的 `active`、合作 PB 角色(`pbWrite`)与当前 feed 大小。`twitimer set markers_enable false` 使 `userEnabled=off` 而 `autoDisabled` 仍为 off——两个维度相互独立(R8.5.1.5)。
+
 当编辑模式开启(`twitimer set markers_edit_mode true`)时,标记覆盖层 / feed 应响应这些改动。
 
 排行榜 feed 必须**按尝试**重置:`twitimer pass` 过关后进入下一次尝试——即使下一关仍是同一关(剧情重复关卡)——`twitimer marker feed` 应只列出新尝试的行。新尝试的首次触发会**替换**掉上一次尝试的残留行,而不是追加在其后。
+
+**合作行为(R10.10)。** 多人会话中**任意玩家**都可以触发标记(主机与客机端都会遍历全部玩家判定);标记 PB 写入仅主机进行——客机从不持久化 PB(`twitimer marker list` 显示 `pbWrite=disabled (co-op client, host-only)`,`twitimer marker pb` 会被拒绝)。无需真实客机会话,可用 `twitimer marker clientmode` 强制角色(仅本次会话有效;`auto` 恢复):
+
+```text
+twitimer marker clientmode status   # role / pbWrite / net / override
+twitimer marker clientmode on       # 模拟为合作客机 -> 禁止写 PB
+twitimer marker clientmode off      # 模拟为主机 / 单人 -> 允许写 PB
+twitimer marker clientmode auto     # 恢复自动(仅 NetGame.isClient 时禁止)
+```
+
+验证:`twitimer marker clientmode on` 后 `twitimer marker list` 显示 `pbWrite=disabled...`,`twitimer marker pb 12345` 被拒绝;`twitimer marker clientmode off` 恢复。**"任意玩家触发"**部分需要真实合作会话:两名玩家在同一关时,任一人进入范围盒 / 抓住目标物体都会触发标记,`twitimer marker feed` 在两台机器上都会列出。
 
 ### 9. 本地化(R7)
 
@@ -262,6 +335,8 @@ twitimer leaderboard mode Subsegment
 twitimer leaderboard hide
 twitimer leaderboard cycle
 ```
+
+**循环会跳过被禁用的模式(R8.5.1.2)。** `twitimer leaderboard status` 显示当前 `mode` 与 `available` 模式(用户开启且未被自动禁用)。两个模块都开启时,`cycle` 依次走关闭 → 分段对比 → 标记 → 关闭。禁用 subsegment(`twitimer sub clientmode on`,或 `twitimer set subsegment_enable false`)后,`cycle` 只在关闭 ↔ 标记之间轮换:从关闭直接进入标记(绝不进入分段对比),从标记进入关闭。两者都禁用时 `cycle` 保持关闭。禁用 markers(`twitimer set markers_enable false`)同理,循环变为关闭 ↔ 分段对比。当前显示的模式变得不可用时(例如排行榜处于分段对比模式时客机门控生效),该模式不再绘制任何内容,下一次 `cycle` 按键进入关闭。
 
 ### 11. LevelCollections 集成(可选)
 
@@ -433,18 +508,21 @@ twitimer match exit
 - [ ] `twitimer` 打印命令摘要。
 - [ ] 关卡内 `twitimer status` 显示合理的实时值。
 - [ ] `twitimer reset` 将计时器归零并清除标记。
-- [ ] `twitimer clock` 显示整数 tick,且 `twitimer clock history` 对重复的相同操作记录一致的 `dur=`(R1.11)。
+- [ ] `twitimer clock` 显示整数 tick,且 `twitimer clock history` 对重复的相同操作记录一致的 `dur=`(R1.11);`pass` 行(`Game.Fall` 通关检测)携带分段终点 tick。
 - [ ] `twitimer retry` 重载当前关卡(或配置的重定向目标)。
-- [ ] `twitimer pass` 完成当前关卡;`twitimer status` 显示记录的分段以及(最后一关)`lastRun`,且没有分段 / 标记 PB 文件被改动。
+- [ ] `twitimer pass` 完成当前关卡;`twitimer status` 显示记录的分段、定格的 `prevRt`(该关结束时的现实时间)与(最后一关时)`lastRun`,且 subsegment/marker 的 PB 文件未变化。
 - [ ] `twitimer pass real` 把玩家传送到判定箱内,游戏自身触发流程完成关卡(`LevelPassed` 被闩锁);PB 依旧不写入。
 - [ ] `twitimer hud off/on` 隐藏 / 显示计时 HUD。
 - [ ] `twitimer panel open/close` 打开 / 关闭设置面板。
 - [ ] `twitimer tag enable/disable` 改变启用的标签并持久化。
+- [ ] `twitimer sub clientmode on` 后显示 `active=off coopClientGate=on` 且排行榜移除分段模式;`twitimer sub clientmode auto` 恢复(R8.10)。
 - [ ] `twitimer set language zh-Hans` 切换界面语言。
-- [ ] `twitimer layout row add/remove` 改变 HUD 行。
+- [ ] `twitimer layout row list/add/remove/clear` 改变 HUD 行(按 1 基位置),含添加 `PrevRt`、`LastRun` 与 `WakeUpTime`。
+- [ ] `twitimer layout column new/remove` 追加 / 删除列,`twitimer set show_real_time` / `show_wake_up_time` 不再被接受(这些行现在是列位置)。
+- [ ] `twitimer layout text add/list/set/remove/clear` 管理自定义文本;面板的 **界面 → 自定义文本** 子页面把每条文本列为下拉(内容、字号、偏移、颜色),带 **删除**(需确认)与 **新建文本** 按钮。
 - [ ] `twitimer preset create/save/apply` 完整往返布局 + 标记。
 - [ ] 有分段数据时 `twitimer sub status/entries` 正常。
-- [ ] `twitimer match enter` 会禁用分段对比(`matchSuppressed=true`、`effective=false`)并隐藏其排行榜;`twitimer match exit` 恢复设置。
+- [ ] `twitimer match enter` 会禁用分段对比(`matchSuppressed=true`、`effective=false`、`autoReasons=match`)并隐藏其排行榜;`twitimer match exit` 恢复设置。
 - [ ] 关卡内 `twitimer marker add/list/toggle/pb` 正常。
 - [ ] `twitimer flags raise/clear` 显示预期的 HUD 横幅 / 软标记行。
 - [ ] 安装或不安装 LevelCollections 时 `twitimer lc status` 均正确报告。

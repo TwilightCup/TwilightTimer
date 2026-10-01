@@ -168,7 +168,7 @@ namespace TwilightTimer
             {
                 sb.AppendLine($"segment={state.InSegment} timing={state.TimingActive} retrying={state.Retrying} realTimeActive={state.RealTimeActive}");
                 sb.AppendLine($"gameTime={FormatNumber(state.GameTimeSeconds)} segmentTime={FormatNumber(GameClock.SegmentSeconds(state))} realTime={FormatNumber(state.RealTime)}");
-                sb.AppendLine($"lastSegment={FormatNullable(GameClock.LastSegmentSeconds(state))} totalAtLastSegment={FormatNullable(GameClock.TotalAtLastSegmentSeconds(state))} lastRun={FormatNullable(GameClock.LastRunSeconds(state))} wakeUp={FormatNullable(GameClock.WakeUpSeconds(state))}");
+                sb.AppendLine($"lastSegment={FormatNullable(GameClock.LastSegmentSeconds(state))} totalAtLastSegment={FormatNullable(GameClock.TotalAtLastSegmentSeconds(state))} prevRt={FormatNullable(GameClock.RealTimeAtLastSegmentSeconds(state))} lastRun={FormatNullable(GameClock.LastRunSeconds(state))} wakeUp={FormatNullable(GameClock.WakeUpSeconds(state))}");
                 sb.AppendLine($"level={state.CurrentLevelNumber} type={state.CurrentLevelType} cp={(game != null ? game.currentCheckpointNumber : -1)} prevCp={state.PrevCheckpoint} maxCp={state.MaxCheckpointThisLevel} campaignRetryLevel={state.CampaignRetryLevel}");
                 sb.Append("flags:");
                 string hard = state.Flags.FormatReasons(loc);
@@ -199,14 +199,14 @@ namespace TwilightTimer
             sb.AppendLine();
 
             var sub = SubsegmentManager.Instance;
-            sb.AppendLine($"subsegment={(sub != null && sub.Enabled ? "on" : "off")} matchSuppressed={sub != null && sub.MatchSuppressed} set={s.SubsegmentEnable} entries={(sub != null ? sub.Entries.Count : 0)} title=\"{sub?.LeaderboardTitle}\" multiRun={sub != null && sub.InMultiRunActive} preserved={sub != null && sub.InPreservedTransition}");
+            sb.AppendLine($"subsegment={(sub != null && s.SubsegmentEnable ? "on" : "off")} active={(sub != null && sub.IsActiveNow ? "on" : "off")} userEnabled={(sub != null && sub.IsUserEnabled ? "on" : "off")} autoDisabled={(sub != null && sub.IsAutoDisabled ? "on" : "off")} autoReasons={FormatReasons(sub?.AutoDisabledReasons)} coopClientGate={(sub != null && sub.IsCoopClientDisabled ? "on" : "off")} matchSuppressed={sub != null && sub.MatchSuppressed} set={s.SubsegmentEnable} entries={(sub != null ? sub.Entries.Count : 0)} title=\"{sub?.LeaderboardTitle}\" multiRun={sub != null && sub.InMultiRunActive} preserved={sub != null && sub.InPreservedTransition}");
 
             var markers = MarkersManager.Instance;
             int markerCount = markers?.CurrentSet != null ? markers.CurrentSet.markers.Count : 0;
-            sb.AppendLine($"markers={(s.MarkersEnable ? "on" : "off")} currentLevel=\"{markers?.CurrentLevelKey}\" markers={markerCount} feed={markers?.Feed.Count ?? 0}");
+            sb.AppendLine($"markers={(s.MarkersEnable ? "on" : "off")} userEnabled={(markers != null && markers.IsUserEnabled ? "on" : "off")} autoDisabled={(markers != null && markers.IsAutoDisabled ? "on" : "off")} autoReasons={FormatReasons(markers?.AutoDisabledReasons)} pbWrite={(markers != null && markers.IsPbWriteEnabled ? "on" : "off")} currentLevel=\"{markers?.CurrentLevelKey}\" markers={markerCount} feed={markers?.Feed.Count ?? 0}");
 
             var lb = LeaderboardHud.Instance;
-            sb.Append($"leaderboard={(lb != null && lb.Visible ? "visible" : "hidden")} mode={cfg.Layout.LeaderboardMode}");
+            sb.Append($"leaderboard={(lb != null && lb.Visible ? "visible" : "hidden")} mode={cfg.Layout.LeaderboardMode} available={FormatAvailableModes()}");
             if (lb != null)
                 sb.Append($" anchoredBelowMatch={lb.AnchoredBelowMatch} topY={lb.LastTopY.ToString("0.#", CultureInfo.InvariantCulture)}");
             sb.AppendLine();
@@ -217,6 +217,27 @@ namespace TwilightTimer
             sb.Append("configDir=").Append(PersistenceService.PluginDir)
               .Append(" source=").Append(PersistenceService.UseHsrtimer ? "HSRTimer" : "TwilightTimer");
             Print(sb.ToString());
+        }
+
+        /// <summary>Format a list of active auto-disable source reasons; "none" when empty.</summary>
+        private static string FormatReasons(List<string> reasons)
+        {
+            if (reasons == null || reasons.Count == 0)
+                return "none";
+            return string.Join(",", reasons);
+        }
+
+        /// <summary>
+        /// The leaderboard content modes currently in the cycle (user-enabled
+        /// and not auto-disabled), or "none". Mirrors
+        /// <see cref="LeaderboardHud.AvailableModes"/>.
+        /// </summary>
+        private static string FormatAvailableModes()
+        {
+            var modes = LeaderboardHud.AvailableModes();
+            if (modes == null || modes.Count == 0)
+                return "none";
+            return string.Join(",", modes);
         }
 
         /// <summary>
@@ -286,7 +307,7 @@ namespace TwilightTimer
             sb.AppendLine("Layout keys:");
             foreach (var f in LayoutFields)
             {
-                if (f.FieldType == typeof(List<RowType>) || f.FieldType == typeof(List<CustomText>))
+                if (IsLayoutCollection(f))
                     continue; // managed by 'twitimer layout row/text'
                 sb.Append("  ").AppendLine(FieldName(f.Name));
             }
@@ -309,7 +330,7 @@ namespace TwilightTimer
                 sb.AppendLine("--- layout ---");
                 foreach (var f in LayoutFields)
                 {
-                    if (f.FieldType == typeof(List<RowType>) || f.FieldType == typeof(List<CustomText>))
+                    if (IsLayoutCollection(f))
                         continue;
                     sb.AppendLine($"{FieldName(f.Name)} = {FormatFieldValue(f, cfg.Layout)}");
                 }
@@ -779,6 +800,7 @@ namespace TwilightTimer
             var sb = new StringBuilder();
             sb.Append("leaderboard = ").Append(lb.Visible ? "visible" : "hidden");
             sb.Append(", mode = ").Append(cfg.Layout.LeaderboardMode);
+            sb.Append(", available = ").Append(FormatAvailableModes());
             sb.Append(", matchMode = ").Append(MatchMode.Active ? "on" : "off");
             if (MatchMode.Active)
             {
@@ -806,6 +828,7 @@ namespace TwilightTimer
             {
                 case "status": CmdLayoutStatus(cfg); break;
                 case "row": CmdLayoutRow(cfg, rest); break;
+                case "column": CmdLayoutColumn(cfg, rest); break;
                 case "text": CmdLayoutText(cfg, rest); break;
                 case "set":
                     if (rest.Count < 2) { Print("Usage: twitimer layout set <key> <value>"); return; }
@@ -816,9 +839,18 @@ namespace TwilightTimer
                     CmdGet(new List<string> { rest[0] });
                     break;
                 default:
-                    Print("Usage: twitimer layout [status|row ...|text ...|get <key>|set <key> <value>]");
+                    Print("Usage: twitimer layout [status|row ...|column ...|text ...|get <key>|set <key> <value>]");
                     break;
             }
+        }
+
+        /// <summary>Append a column's rows as " pos=RowType" pairs, sorted by 1-based position.</summary>
+        private static void AppendColumnRows(StringBuilder sb, Dictionary<int, RowType> rows)
+        {
+            var positions = new List<int>(rows.Keys);
+            positions.Sort();
+            foreach (var pos in positions)
+                sb.Append(' ').Append(pos).Append('=').Append(rows[pos]);
         }
 
         private static void CmdLayoutStatus(ConfigService cfg)
@@ -826,16 +858,21 @@ namespace TwilightTimer
             var l = cfg.Layout;
             var sb = new StringBuilder();
             sb.AppendLine($"offsetX={l.OffsetX} offsetY={l.OffsetY} fontSize={l.FontSize} colorA={GradientText.ToHex(l.ColorA)} colorB={GradientText.ToHex(l.ColorB)}");
-            sb.Append("rows:");
-            for (int i = 0; i < l.Rows.Count; i++)
-                sb.Append(' ').Append(i).Append('=').Append(l.Rows[i]);
+            sb.Append("columns:");
+            var colIndices = new List<int>(l.Columns.Keys);
+            colIndices.Sort();
+            foreach (var col in colIndices)
+            {
+                sb.Append(" [").Append(col).Append(']');
+                AppendColumnRows(sb, l.Columns[col]);
+            }
             sb.AppendLine();
             sb.Append("customTexts:");
             if (l.CustomTexts.Count == 0)
                 sb.Append(" none");
             else
                 for (int i = 0; i < l.CustomTexts.Count; i++)
-                    sb.Append(' ').Append(i).Append("=\"").Append(l.CustomTexts[i].Text).Append("\"@(").Append(l.CustomTexts[i].X).Append(',').Append(l.CustomTexts[i].Y).Append(')');
+                    sb.Append(' ').Append(i).Append("=\"").Append(l.CustomTexts[i].Text).Append("\"@(").Append(l.CustomTexts[i].X).Append(',').Append(l.CustomTexts[i].Y).Append(")size=").Append(l.CustomTexts[i].FontSize);
             sb.AppendLine();
             sb.AppendLine($"leaderboard: fontSize={l.LeaderboardFontSize} offsetX={l.LeaderboardOffsetX} offsetY={l.LeaderboardOffsetY} mode={l.LeaderboardMode} markersTimeMode={l.LeaderboardMarkersTimeMode}");
             Print(sb.ToString());
@@ -844,48 +881,147 @@ namespace TwilightTimer
         private static void CmdLayoutRow(ConfigService cfg, List<string> args)
         {
             var l = cfg.Layout;
-            if (args.Count == 0) { Print("Usage: twitimer layout row <list|add <type>|remove <index>|clear>"); return; }
+            if (args.Count == 0) { Print("Usage: twitimer layout row <list|add <column> <type> [position]|remove <column> <position>|clear <column>>"); return; }
             string sub = args[0].ToLowerInvariant();
             switch (sub)
             {
                 case "list":
                     var sb = new StringBuilder();
-                    for (int i = 0; i < l.Rows.Count; i++)
-                        sb.AppendLine($"{i}: {l.Rows[i]}");
-                    Print(sb.Length == 0 ? "No rows configured." : sb.ToString());
+                    var cols = new List<int>(l.Columns.Keys);
+                    cols.Sort();
+                    foreach (var col in cols)
+                    {
+                        sb.Append("column ").Append(col).Append(':');
+                        AppendColumnRows(sb, l.Columns[col]);
+                        sb.AppendLine();
+                    }
+                    Print(sb.Length == 0 ? "No columns configured." : sb.ToString());
                     return;
                 case "add":
-                    if (args.Count < 2) { Print("Usage: twitimer layout row add <RowType>"); return; }
-                    if (Enum.TryParse(args[1], true, out RowType rt))
+                {
+                    int col;
+                    if (args.Count < 3 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1)
                     {
-                        l.Rows.Add(rt);
-                        cfg.SaveSettings();
-                        Print($"Added row {rt} at index {l.Rows.Count - 1}.");
-                    }
-                    else
-                    {
-                        Print($"Unknown RowType: {args[1]}. Valid: {string.Join(", ", Enum.GetNames(typeof(RowType)))}");
-                    }
-                    return;
-                case "remove":
-                    if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
-                        || idx < 0 || idx >= l.Rows.Count)
-                    {
-                        Print("Usage: twitimer layout row remove <index>");
+                        Print("Usage: twitimer layout row add <column> <RowType> [position]");
                         return;
                     }
-                    var removed = l.Rows[idx];
-                    l.Rows.RemoveAt(idx);
+                    if (!Enum.TryParse(args[2], true, out RowType rt))
+                    {
+                        Print($"Unknown RowType: {args[2]}. Valid: {string.Join(", ", Enum.GetNames(typeof(RowType)))}");
+                        return;
+                    }
+                    int pos = 0;
+                    if (args.Count >= 4 && !int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out pos))
+                    {
+                        Print("Usage: twitimer layout row add <column> <RowType> [position]");
+                        return;
+                    }
+                    Dictionary<int, RowType> rows;
+                    if (!l.Columns.TryGetValue(col, out rows))
+                    {
+                        rows = new Dictionary<int, RowType>();
+                        l.Columns[col] = rows;
+                    }
+                    if (pos <= 0)
+                    {
+                        // No explicit position: append after the current last one.
+                        int max = 0;
+                        foreach (var k in rows.Keys)
+                            if (k > max) max = k;
+                        pos = max + 1;
+                    }
+                    int existing = LayoutModel.PositionOf(rows, rt);
+                    if (existing > 0) rows.Remove(existing);
+                    rows.Remove(pos);   // displace any other row already at this position
+                    rows[pos] = rt;
                     cfg.SaveSettings();
-                    Print($"Removed row {idx} ({removed}).");
+                    Print($"Set row {rt} at column {col} position {pos}.");
                     return;
+                }
+                case "remove":
+                {
+                    int col;
+                    int pos;
+                    Dictionary<int, RowType> rows;
+                    if (args.Count < 3 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1
+                        || !int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out pos)
+                        || !l.Columns.TryGetValue(col, out rows)
+                        || pos < 1 || !rows.ContainsKey(pos))
+                    {
+                        Print("Usage: twitimer layout row remove <column> <position>");
+                        return;
+                    }
+                    var removed = rows[pos];
+                    rows.Remove(pos);
+                    cfg.SaveSettings();
+                    Print($"Removed row at column {col} position {pos} ({removed}).");
+                    return;
+                }
                 case "clear":
-                    l.Rows.Clear();
+                {
+                    int col;
+                    Dictionary<int, RowType> rows;
+                    if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1
+                        || !l.Columns.TryGetValue(col, out rows))
+                    {
+                        Print("Usage: twitimer layout row clear <column>");
+                        return;
+                    }
+                    rows.Clear();
                     cfg.SaveSettings();
-                    Print("Cleared all layout rows.");
+                    Print($"Cleared column {col} (empty columns are not displayed).");
                     return;
+                }
                 default:
-                    Print("Usage: twitimer layout row <list|add <type>|remove <index>|clear>");
+                    Print("Usage: twitimer layout row <list|add <column> <type> [position]|remove <column> <position>|clear <column>>");
+                    return;
+            }
+        }
+
+        private static void CmdLayoutColumn(ConfigService cfg, List<string> args)
+        {
+            var l = cfg.Layout;
+            if (args.Count == 0) { Print("Usage: twitimer layout column <list|new|remove <column>>"); return; }
+            string sub = args[0].ToLowerInvariant();
+            switch (sub)
+            {
+                case "list":
+                {
+                    var cols = new List<int>(l.Columns.Keys);
+                    cols.Sort();
+                    if (cols.Count == 0)
+                        Print("No columns configured.");
+                    else
+                        Print("columns: " + string.Join(", ", cols.ConvertAll(c => c.ToString(CultureInfo.InvariantCulture)).ToArray()));
+                    return;
+                }
+                case "new":
+                {
+                    int max = 0;
+                    foreach (var k in l.Columns.Keys)
+                        if (k > max) max = k;
+                    int next = max + 1;
+                    l.Columns[next] = new Dictionary<int, RowType>();
+                    cfg.SaveSettings();
+                    Print($"Created column {next} (empty; use 'twitimer layout row add {next} <RowType> [position]' to fill it).");
+                    return;
+                }
+                case "remove":
+                {
+                    int col;
+                    if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1
+                        || !l.Columns.ContainsKey(col))
+                    {
+                        Print("Usage: twitimer layout column remove <column>");
+                        return;
+                    }
+                    l.Columns.Remove(col);
+                    cfg.SaveSettings();
+                    Print($"Removed column {col}.");
+                    return;
+                }
+                default:
+                    Print("Usage: twitimer layout column <list|new|remove <column>>");
                     return;
             }
         }
@@ -893,7 +1029,8 @@ namespace TwilightTimer
         private static void CmdLayoutText(ConfigService cfg, List<string> args)
         {
             var l = cfg.Layout;
-            if (args.Count == 0) { Print("Usage: twitimer layout text <list|add <x> <y> <text...>|remove <index>|clear>"); return; }
+            const string usage = "Usage: twitimer layout text <list|add <x> <y> <text...>|set <index> <x|y|text|font_size|color_a|color_b> <value>|remove <index>|clear>";
+            if (args.Count == 0) { Print(usage); return; }
             string sub = args[0].ToLowerInvariant();
             switch (sub)
             {
@@ -902,7 +1039,7 @@ namespace TwilightTimer
                     for (int i = 0; i < l.CustomTexts.Count; i++)
                     {
                         var t = l.CustomTexts[i];
-                        sb.AppendLine($"{i}: \"{t.Text}\" @({t.X},{t.Y}) {GradientText.ToHex(t.ColorA)}/{GradientText.ToHex(t.ColorB)}");
+                        sb.AppendLine($"{i}: \"{t.Text}\" @({t.X},{t.Y}) size={t.FontSize} {GradientText.ToHex(t.ColorA)}/{GradientText.ToHex(t.ColorB)}");
                     }
                     Print(sb.Length == 0 ? "No custom texts configured." : sb.ToString());
                     return;
@@ -923,6 +1060,63 @@ namespace TwilightTimer
                     cfg.SaveSettings();
                     Print($"Added custom text {l.CustomTexts.Count - 1}: \"{text}\".");
                     return;
+                case "set":
+                    if (args.Count < 4
+                        || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int setIdx)
+                        || setIdx < 0 || setIdx >= l.CustomTexts.Count)
+                    {
+                        Print("Usage: twitimer layout text set <index> <x|y|text|font_size|color_a|color_b> <value>");
+                        return;
+                    }
+                    var target = l.CustomTexts[setIdx];
+                    string field = args[2].ToLowerInvariant();
+                    string setValue = string.Join(" ", args.GetRange(3, args.Count - 3));
+                    switch (field)
+                    {
+                        case "x":
+                            if (!float.TryParse(setValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float nx))
+                            {
+                                Print("x must be a number.");
+                                return;
+                            }
+                            target.X = nx;
+                            break;
+                        case "y":
+                            if (!float.TryParse(setValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float ny))
+                            {
+                                Print("y must be a number.");
+                                return;
+                            }
+                            target.Y = ny;
+                            break;
+                        case "text":
+                            target.Text = setValue;
+                            break;
+                        case "font_size":
+                            if (!int.TryParse(setValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int nSize) || nSize <= 0)
+                            {
+                                Print("font_size must be a positive integer.");
+                                return;
+                            }
+                            target.FontSize = nSize;
+                            break;
+                        case "color_a":
+                        case "color_b":
+                            if (!GradientText.TryParseColor(setValue, out Color parsedColor))
+                            {
+                                Print($"{field} must be a hex color (e.g. FF0000FF).");
+                                return;
+                            }
+                            if (field == "color_a") target.ColorA = parsedColor;
+                            else target.ColorB = parsedColor;
+                            break;
+                        default:
+                            Print("Usage: twitimer layout text set <index> <x|y|text|font_size|color_a|color_b> <value>");
+                            return;
+                    }
+                    cfg.SaveSettings();
+                    Print($"Set custom text {setIdx} {field} = {setValue}.");
+                    return;
                 case "remove":
                     if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
                         || idx < 0 || idx >= l.CustomTexts.Count)
@@ -940,7 +1134,7 @@ namespace TwilightTimer
                     Print("Cleared all custom texts.");
                     return;
                 default:
-                    Print("Usage: twitimer layout text <list|add <x> <y> <text...>|remove <index>|clear>");
+                    Print(usage);
                     return;
             }
         }
@@ -964,6 +1158,11 @@ namespace TwilightTimer
                         Print($"Unknown tag: {args[1]}. Use 'twitimer tag list'.");
                         return;
                     }
+                    if (TagLabels.IsLabel(enableId))
+                    {
+                        Print($"Tag {enableId} is an auto label (enabled only while in multiplayer); it cannot be toggled manually.");
+                        return;
+                    }
                     cfg.EnabledTags.Enable(enableId);
                     cfg.SaveSettings();
                     Print($"Tag {enableId} enabled.");
@@ -971,6 +1170,11 @@ namespace TwilightTimer
                 case "disable":
                     if (args.Count < 2) { Print("Usage: twitimer tag disable <id>"); return; }
                     string disableId = CanonicalTagId(args[1]) ?? args[1];
+                    if (TagLabels.IsLabel(disableId))
+                    {
+                        Print($"Tag {disableId} is an auto label (enabled only while in multiplayer); it cannot be toggled manually.");
+                        return;
+                    }
                     cfg.EnabledTags.Disable(disableId);
                     cfg.SaveSettings();
                     Print($"Tag {disableId} disabled.");
@@ -983,6 +1187,11 @@ namespace TwilightTimer
                         Print($"Unknown tag: {args[1]}. Use 'twitimer tag list'.");
                         return;
                     }
+                    if (TagLabels.IsLabel(setId))
+                    {
+                        Print($"Tag {setId} is an auto label (enabled only while in multiplayer); it cannot be toggled manually.");
+                        return;
+                    }
                     if (SettingsModel.ParseBool(args[2], false))
                         cfg.EnabledTags.Enable(setId);
                     else
@@ -990,28 +1199,79 @@ namespace TwilightTimer
                     cfg.SaveSettings();
                     Print($"Tag {setId} = {(cfg.EnabledTags.HasTag(setId) ? "on" : "off")}.");
                     break;
+                case "label":
+                    CmdTagLabel(args);
+                    break;
                 default:
-                    Print("Usage: twitimer tag [list|enable <id>|disable <id>|set <id> <on|off>]");
+                    Print("Usage: twitimer tag [list|label <status|on|off|auto>|enable <id>|disable <id>|set <id> <on|off>]");
                     break;
             }
         }
 
         /// <summary>
+        /// Inspect / override the auto Co-op label (R3.10). The label normally
+        /// follows the live game mode (on while NetGame.isServer/isClient, i.e.
+        /// a multiplayer session); the override forces it for testing the label
+        /// display without real multiplayer, mirroring how 'twitimer flags raise'
+        /// forces validity flags. The override is session-only (cleared by
+        /// restart / 'auto').
+        /// </summary>
+        private static void CmdTagLabel(List<string> args)
+        {
+            if (args.Count < 2)
+            {
+                Print("Usage: twitimer tag label <status|on|off|auto>");
+                return;
+            }
+            string mode = args[1].ToLowerInvariant();
+            switch (mode)
+            {
+                case "status":
+                {
+                    bool net = NetGame.isServer || NetGame.isClient;
+                    bool effective = TimerCore.CoopLabelOverride ?? net;
+                    Print($"Co-op label: effective={(effective ? "on" : "off")} net={(net ? "on" : "off")} override={(TimerCore.CoopLabelOverride.HasValue ? (TimerCore.CoopLabelOverride.Value ? "on" : "off") : "auto")}");
+                    return;
+                }
+                case "on":
+                    TimerCore.CoopLabelOverride = true;
+                    break;
+                case "off":
+                    TimerCore.CoopLabelOverride = false;
+                    break;
+                case "auto":
+                    TimerCore.CoopLabelOverride = null;
+                    break;
+                default:
+                    Print("Usage: twitimer tag label <status|on|off|auto>");
+                    return;
+            }
+            Print($"Co-op label override = {(TimerCore.CoopLabelOverride.HasValue ? (TimerCore.CoopLabelOverride.Value ? "on" : "off") : "auto")}.");
+        }
+
+        /// <summary>
         /// Resolve a tag id case-insensitively (the game console lowercases all
-        /// input before our handler runs) to the canonical registered id, or
-        /// null when no registered tag matches.
+        /// input before our handler runs) to the canonical registered rule id or
+        /// label-tag id (see <see cref="TagLabels"/>), or null when nothing
+        /// matches.
         /// </summary>
         private static string CanonicalTagId(string id)
         {
             if (string.IsNullOrEmpty(id))
                 return null;
             var registry = TagRuleRegistry.Instance;
-            if (registry == null)
-                return null;
-            foreach (var rule in registry.All)
+            if (registry != null)
             {
-                if (rule != null && string.Equals(rule.Id, id, StringComparison.OrdinalIgnoreCase))
-                    return rule.Id;
+                foreach (var rule in registry.All)
+                {
+                    if (rule != null && string.Equals(rule.Id, id, StringComparison.OrdinalIgnoreCase))
+                        return rule.Id;
+                }
+            }
+            foreach (var label in TagLabels.All)
+            {
+                if (string.Equals(label, id, StringComparison.OrdinalIgnoreCase))
+                    return label;
             }
             return null;
         }
@@ -1035,6 +1295,10 @@ namespace TwilightTimer
                 sb.Append("available:");
                 foreach (var rule in registry.All)
                     sb.Append(' ').Append(rule.Id).Append(cfg.EnabledTags.HasTag(rule.Id) ? " [on]" : " [off]");
+                sb.AppendLine();
+                sb.Append("labels (auto):");
+                foreach (var label in TagLabels.All)
+                    sb.Append(' ').Append(label).Append(cfg.EnabledTags.HasTag(label) ? " [on]" : " [off]");
             }
             Print(sb.ToString());
         }
@@ -1219,7 +1483,7 @@ namespace TwilightTimer
                 case "status":
                     var opts = sub.Options;
                     var sb = new StringBuilder();
-                    sb.AppendLine($"enable={opts.Enable} matchSuppressed={sub.MatchSuppressed} effective={sub.Enabled} samplingAllowedForLevel={sub.SamplingAllowedForLevel}");
+                    sb.AppendLine($"enable={opts.Enable} matchSuppressed={sub.MatchSuppressed} effective={sub.Enabled} userEnabled={sub.IsUserEnabled} autoDisabled={sub.IsAutoDisabled} autoReasons={FormatReasons(sub.AutoDisabledReasons)} active={sub.IsActiveNow} coopClientGate={sub.IsCoopClientDisabled} samplingAllowedForLevel={sub.SamplingAllowedForLevel}");
                     sb.AppendLine($"multiRun={sub.InMultiRunActive} preserved={sub.InPreservedTransition}");
                     sb.AppendLine($"title=\"{sub.LeaderboardTitle}\" entries={sub.Entries.Count}");
                     sb.AppendLine($"pbPath={opts.PBPath} loadPath={opts.LoadPath} multiProject={opts.MultiProject}");
@@ -1227,6 +1491,9 @@ namespace TwilightTimer
                     if (sub.MatchSuppressed)
                         sb.AppendLine("note: a match is active — subsegment is disabled until the match ends (T7.5).");
                     Print(sb.ToString());
+                    break;
+                case "clientmode":
+                    CmdSubClientMode(sub, args);
                     break;
                 case "entries":
                     var entries = sub.Entries;
@@ -1247,9 +1514,50 @@ namespace TwilightTimer
                     Print("Cleared subsegment runtime state (no PB written).");
                     break;
                 default:
-                    Print("Usage: twitimer sub [status|entries|clear]");
+                    Print("Usage: twitimer sub [status|entries|clear|clientmode <status|on|off|auto>]");
                     break;
             }
+        }
+
+        /// <summary>
+        /// Inspect / override the co-op client gate (R8.10). Normally a
+        /// multiplayer client (NetGame.isClient) has the subsegment module
+        /// disabled entirely; the override forces the gate for testing without a
+        /// real client session ('on' = treat as client → module off, 'off' =
+        /// treat as host/single-player, 'auto' restores the net-driven state).
+        /// Session-only, mirroring 'twitimer tag label' / 'twitimer flags raise'.
+        /// </summary>
+        private static void CmdSubClientMode(SubsegmentManager sub, List<string> args)
+        {
+            if (args.Count < 2)
+            {
+                Print("Usage: twitimer sub clientmode <status|on|off|auto>");
+                return;
+            }
+            string mode = args[1].ToLowerInvariant();
+            switch (mode)
+            {
+                case "status":
+                {
+                    bool net = NetGame.isClient;
+                    bool effective = SubsegmentManager.CoopClientOverride ?? net;
+                    Print($"subsegment client gate: effective={(effective ? "on" : "off")} net={(net ? "on" : "off")} override={(SubsegmentManager.CoopClientOverride.HasValue ? (SubsegmentManager.CoopClientOverride.Value ? "on" : "off") : "auto")} (on = treated as co-op client, subsegment disabled)");
+                    return;
+                }
+                case "on":
+                    SubsegmentManager.CoopClientOverride = true;
+                    break;
+                case "off":
+                    SubsegmentManager.CoopClientOverride = false;
+                    break;
+                case "auto":
+                    SubsegmentManager.CoopClientOverride = null;
+                    break;
+                default:
+                    Print("Usage: twitimer sub clientmode <status|on|off|auto>");
+                    return;
+            }
+            Print($"subsegment client gate override = {(SubsegmentManager.CoopClientOverride.HasValue ? (SubsegmentManager.CoopClientOverride.Value ? "on" : "off") : "auto")}.");
         }
 
         // ── markers ────────────────────────────────────────────────────────
@@ -1266,6 +1574,7 @@ namespace TwilightTimer
             var rest = args.GetRange(1, args.Count - 1);
             switch (action)
             {
+                case "status": CmdMarkerStatus(mgr); break;
                 case "list": CmdMarkerList(); break;
                 case "feed": CmdMarkerFeed(); break;
                 case "add": CmdMarkerAdd(mgr, rest); break;
@@ -1276,6 +1585,9 @@ namespace TwilightTimer
                 case "toggle":
                     if (rest.Count < 1) { Print("Usage: twitimer marker toggle <id>"); return; }
                     CmdMarkerToggle(mgr, rest[0]);
+                    break;
+                case "clientmode":
+                    CmdMarkerClientMode(mgr, rest);
                     break;
                 case "pb":
                     if (rest.Count < 1) { Print("Usage: twitimer marker pb <total_ms>"); return; }
@@ -1296,9 +1608,63 @@ namespace TwilightTimer
                     Print("Marker cache reloaded from disk.");
                     break;
                 default:
-                    Print("Usage: twitimer marker [list|feed|add ...|remove <id>|toggle <id>|pb <total_ms>|pbclear|clear|save|reload]");
+                    Print("Usage: twitimer marker [status|list|feed|add ...|remove <id>|toggle <id>|clientmode <status|on|off|auto>|pb <total_ms>|pbclear|clear|save|reload]");
                     break;
             }
+        }
+
+        /// <summary>
+        /// Inspect / override the co-op client role for marker PB writes
+        /// (R10.10.2). Normally a co-op client never persists a marker PB
+        /// (host-only); the override forces the role for testing without a real
+        /// client session ('on' = treat as client → PB writes blocked, 'off' =
+        /// treat as host/single-player, 'auto' restores the net-driven state).
+        /// Session-only, mirroring 'twitimer sub clientmode'.
+        /// </summary>
+        private static void CmdMarkerClientMode(MarkersManager mgr, List<string> args)
+        {
+            if (args.Count < 1)
+            {
+                Print("Usage: twitimer marker clientmode <status|on|off|auto>");
+                return;
+            }
+            string mode = args[0].ToLowerInvariant();
+            switch (mode)
+            {
+                case "status":
+                {
+                    bool net = NetGame.isClient;
+                    bool effective = MarkersManager.PbClientOverride ?? net;
+                    Print($"marker PB gate: role={(effective ? "client" : "host/single")} pbWrite={(effective ? "disabled" : "enabled")} net={(net ? "client" : "host/single")} override={(MarkersManager.PbClientOverride.HasValue ? (MarkersManager.PbClientOverride.Value ? "client" : "host/single") : "auto")}");
+                    return;
+                }
+                case "on":
+                    MarkersManager.PbClientOverride = true;
+                    break;
+                case "off":
+                    MarkersManager.PbClientOverride = false;
+                    break;
+                case "auto":
+                    MarkersManager.PbClientOverride = null;
+                    break;
+                default:
+                    Print("Usage: twitimer marker clientmode <status|on|off|auto>");
+                    return;
+            }
+            Print($"marker PB gate override = {(MarkersManager.PbClientOverride.HasValue ? (MarkersManager.PbClientOverride.Value ? "client (PB writes disabled)" : "host/single (PB writes enabled)") : "auto")}.");
+        }
+
+        /// <summary>
+        /// Print the markers module's enable/availability state: the user's
+        /// <c>Markers.Enable</c> setting, any active auto-disable sources, the
+        /// co-op PB role, and the current feed size. Mirrors 'twitimer sub status'
+        /// (R8.5.1.2: user-enabled and auto-disabled are reported separately).
+        /// </summary>
+        private static void CmdMarkerStatus(MarkersManager mgr)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"enable={mgr.IsUserEnabled} userEnabled={mgr.IsUserEnabled} autoDisabled={mgr.IsAutoDisabled} autoReasons={FormatReasons(mgr.AutoDisabledReasons)} active={mgr.IsActiveNow} pbWrite={mgr.IsPbWriteEnabled} feed={mgr.Feed.Count}");
+            Print(sb.ToString());
         }
 
         private static void CmdMarkerList()
@@ -1311,6 +1677,7 @@ namespace TwilightTimer
             }
             var sb = new StringBuilder();
             sb.AppendLine($"level=\"{set.level_id}\" category=\"{set.category_key}\" source={set.level_source} number={set.level_number}");
+            sb.AppendLine($"pbWrite={(MarkersManager.Instance != null && MarkersManager.Instance.IsPbWriteEnabled ? "enabled" : "disabled (co-op client, host-only)")}");
             sb.Append("PB: ");
             if (set.pb != null)
             {
@@ -1521,6 +1888,11 @@ namespace TwilightTimer
 
         private static void CmdMarkerSetPb(MarkersManager mgr, string msText)
         {
+            if (mgr != null && !mgr.IsPbWriteEnabled)
+            {
+                Print("Marker PB writes are disabled on a co-op client (host-only, R10.10.2); use 'twitimer marker clientmode off' to force for testing.");
+                return;
+            }
             if (!long.TryParse(msText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long ms))
             {
                 Print("PB total must be an integer number of milliseconds.");
@@ -2360,7 +2732,7 @@ namespace TwilightTimer
             }
             foreach (var f in LayoutFields)
             {
-                if (f.FieldType == typeof(List<RowType>) || f.FieldType == typeof(List<CustomText>))
+                if (IsLayoutCollection(f))
                     continue;
                 if (Normalize(f.Name) == norm)
                 {
@@ -2416,6 +2788,18 @@ namespace TwilightTimer
                 error = ex.Message;
                 return false;
             }
+        }
+
+        /// <summary>
+        /// True for collection fields managed by the dedicated
+        /// <c>twitimer layout row/text</c> commands rather than <c>twitimer get/set</c>.
+        /// </summary>
+        private static bool IsLayoutCollection(FieldInfo f)
+        {
+            Type t = f.FieldType;
+            return t == typeof(List<RowType>)
+                || t == typeof(List<CustomText>)
+                || t == typeof(Dictionary<int, List<RowType>>);
         }
 
         private static string FormatFieldValue(FieldInfo field, object owner)
@@ -2542,12 +2926,12 @@ namespace TwilightTimer
             sb.AppendLine("  twitimer reset | retry | pass [real]");
             sb.AppendLine("  twitimer hud [on|off|toggle|status] | panel [open|close|toggle|status]");
             sb.AppendLine("  twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]");
-            sb.AppendLine("  twitimer layout [status|row ...|text ...]");
-            sb.AppendLine("  twitimer tag [list|enable <id>|disable <id>|set <id> <on|off>]");
+            sb.AppendLine("  twitimer layout [status|row ...|column ...|text ...]");
+            sb.AppendLine("  twitimer tag [list|label <status|on|off|auto>|enable <id>|disable <id>|set <id> <on|off>]");
             sb.AppendLine("  twitimer lang [list|set <code>|reload|current]");
             sb.AppendLine("  twitimer preset [list|current|create <name>|apply [name]|save|delete <name>]");
-            sb.AppendLine("  twitimer sub [status|entries|clear]");
-            sb.AppendLine("  twitimer marker [list|feed|add ...|remove <id>|toggle <id>|pb <ms>|pbclear|clear|save|reload]");
+            sb.AppendLine("  twitimer sub [status|entries|clear|clientmode <status|on|off|auto>]");
+            sb.AppendLine("  twitimer marker [status|list|feed|add ...|remove <id>|toggle <id>|clientmode <status|on|off|auto>|pb <ms>|pbclear|clear|save|reload]");
             sb.AppendLine("  twitimer flags [list|raise <Reason>|clear [forgivable|soft|all]]");
             sb.AppendLine("  twitimer lc [status|restart] | twitimer config [path|files|source ...]");
             sb.AppendLine("  twitimer match [status|enter|exit|start ...|resume ...|stop|tags ...|segments|leaderboard|penalty]");
@@ -2589,19 +2973,19 @@ namespace TwilightTimer
                 case "panel":
                     return "twitimer panel [open|close|toggle|status]\r\nOpen/close/toggle the IMGUI settings panel.";
                 case "leaderboard":
-                    return "twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]\r\nControl the shared leaderboard HUD.";
+                    return "twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]\r\nControl the shared leaderboard HUD. 'cycle' rotates hidden → available content modes → hidden; a mode whose module is disabled (user setting or an auto-disable mechanism, e.g. the co-op client gate) is skipped (R8.5.1.2). 'status' shows the current mode and which modes are available.";
                 case "layout":
-                    return "twitimer layout [status|row <list|add <type>|remove <index>|clear>|text <list|add <x> <y> <text...>|remove <index>|clear>|get <key>|set <key> <value>]\r\nInspect/edit the HUD layout.";
+                    return "twitimer layout [status|row <list|add <column> <type> [position]|remove <column> <position>|clear <column>>|column <list|new|remove <column>>|text <list|add <x> <y> <text...>|remove <index>|clear>|get <key>|set <key> <value>]\r\nInspect/edit the HUD layout. Rows live in columns ([column.N] in layout.ini): columns are drawn left-to-right by number and an empty column is hidden. Each row's key is its 1-based position within the column (0 is never stored); the panel's Timer HUD editor edits the same positions. Every row type (including LastRun and WakeUpTime) is a regular column row; RealTime is shown only where you place it.";
                 case "tag":
-                    return "twitimer tag [list|enable <id>|disable <id>|set <id> <on|off>]\r\nList available tag rules and toggle which tags are enabled (tags.ini).";
+                    return "twitimer tag [list|label <status|on|off|auto>|enable <id>|disable <id>|set <id> <on|off>]\r\nList available tag rules and toggle which tags are enabled (tags.ini). Auto label tags (e.g. Co-op, R3.10) are listed by 'twitimer tag list' with their live state and cannot be toggled manually; 'twitimer tag label' inspects the Co-op label and can force it on/off for testing ('auto' restores the multiplayer-driven state).";
                 case "lang":
                     return "twitimer lang [list|set <code>|reload|current]\r\nList/change/reload the active language.";
                 case "preset":
                     return "twitimer preset [list|current|create <name>|apply [name]|save|delete <name>]\r\nManage layout/marker presets (R11).";
                 case "sub":
-                    return "twitimer sub [status|entries|clear]\r\nInspect the subsegment module: options, leaderboard entries, or clear runtime state.";
+                    return "twitimer sub [status|entries|clear|clientmode <status|on|off|auto>]\r\nInspect the subsegment module: options, leaderboard entries, or clear runtime state. 'status' reports the user setting (enable/userEnabled) separately from any auto-disable sources (autoDisabled/autoReasons, e.g. the co-op client gate). 'clientmode' inspects/overrides the co-op client gate (R8.10): as a multiplayer client the module is disabled entirely ('on' forces that state for testing, 'auto' restores it).";
                 case "marker":
-                    return "twitimer marker [list|feed|add <range|checkpoint|grab> ...|remove <id>|toggle <id>|pb <total_ms>|pbclear|clear|save|reload]\r\nInspect/edit the current level's marker set.";
+                    return "twitimer marker [status|list|feed|add <range|checkpoint|grab> ...|remove <id>|toggle <id>|clientmode <status|on|off|auto>|pb <total_ms>|pbclear|clear|save|reload]\r\nInspect/edit the current level's marker set. 'status' reports the user setting separately from any auto-disable sources (none today). In co-op any player can trigger markers (R10.10.1) but PB writes are host-only (R10.10.2); 'clientmode' inspects/forces that role for testing ('on' = co-op client, PB writes blocked, 'auto' restores it).";
                 case "flags":
                     return "twitimer flags [list|raise <Reason>|clear [forgivable|soft|all]]\r\nInspect or mutate validity flags for testing (R5).";
                 case "lc":

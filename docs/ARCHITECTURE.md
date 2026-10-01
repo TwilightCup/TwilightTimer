@@ -29,8 +29,9 @@ hooks (`NarrativeBlock.Play` and `SubtitleManager.PlayNarrative`, see
 [VOICELINE.md](VOICELINE.md)), the pause-menu restart hook
 (`PauseMenu.RestartClick`, which fires the `restart_clears_forgivable` option),
 the Jumpless jump-key suppression (`HumanControls.HandleInput`, R3.5.3), and
-the precise timing-boundary hooks (`Game.AfterLoad`, `Game.EnterPassZone`,
-`Game.Fall` — R1.11/TB-3).
+the timing-boundary hooks (`Game.AfterLoad` for the start tick; `Game.Fall` for
+the end tick; `Game.EnterPassZone` / `Game.Fall` to latch the completion flag —
+R1.11/TB-3).
 The last one is a deliberate exception: a pollable field *does* exist
 (`HumanControls.jump`), but enforcement is a *write* into a chain the game both
 writes and consumes within one physics frame (`NetPlayer.PreFixedUpdate` →
@@ -61,7 +62,7 @@ Core/
   LevelIdentity.cs        shared level id / English-name helpers (R8.2.3, R10.1.2)
 Validation/
   InvalidReason.cs        enum + severity map
-  ValidityFlags.cs        unforgivable/forgivable flag sets
+  ValidityFlags.cs        unforgivable/forgivable/soft flag sets
   GenericValidators.cs    cheat-code detector
 Tags/
   ITagRule.cs             tag rule interface + ValidationContext
@@ -74,7 +75,7 @@ Patches/
   NarrativeBlockPatches.cs    postfix on NarrativeBlock.Play
   SubtitleManagerPatches.cs   postfix on SubtitleManager.PlayNarrative
   PauseMenuPatches.cs         postfix on PauseMenu.RestartClick / LoadClick
-  TimingBoundaryPatches.cs    precise segment start/end ticks (Game.AfterLoad / EnterPassZone / Fall, R1.11)
+  TimingBoundaryPatches.cs    precise segment start/end ticks + completion-flag latches (Game.AfterLoad / EnterPassZone / Fall, R1.11)
   HumanControlsPatches.cs     postfix on HumanControls.HandleInput (Jumpless enforcement)
 Hud/
   TimerHud.cs             IMGUI panel (R2)
@@ -147,6 +148,9 @@ The engine's game clock is an **integer physics-tick counter**, not a
 - `RunState.PlayableTicks` (`ulong`) counts playable `FixedUpdate` frames. Every
   segment snapshot (`SegmentStartTicks`, `LastSegmentTicks`,
   `TotalAtLastSegmentTicks`, `LastRunTicks`, `WakeUpTicks`) is an integer tick.
+  The one exception is the "Prev RT" snapshot
+  (`RunState.RealTimeAtLastSegment`): it freezes the wall-clock
+  `RunState.RealTime` (already seconds), not a tick.
   Segment duration is the pure integer difference
   `PlayableTicks - SegmentStartTicks`.
 - `RunState.PauseAccum` (`double`) is the one non-tick component: pausing halts
@@ -159,26 +163,35 @@ The engine's game clock is an **integer physics-tick counter**, not a
   also writes the `RunState.GameTimeSeconds` cache each tick for cheap
   read-only consumers.
 
-**Why the boundary hooks exist.** The game flips `Game.state` to
-`PlayingLevel` inside `Game.AfterLoad`, and detects a level pass inside
-`Game.Fall` — both while the game's own physics step is executing. A polling
-loop can only observe those flips on a later tick, and *which* tick depends on
-Unity script execution order, which is why the old code showed a random ±1 tick
-at load and at the finish. `Patches/TimingBoundaryPatches.cs` therefore records
-the exact tick at the authoritative methods:
+**Why the boundary hooks exist.** Both segment boundaries are observed by the
+polling loop a step late, so `Patches/TimingBoundaryPatches.cs` records the
+exact tick at the authoritative assignment:
+
+- **Start** — `Game.AfterLoad` sets `state = PlayingLevel`; its postfix latches
+  `SegmentStartTicks`.
+- **End** — `Game.Fall` (the pass detection) latches `PendingEndTicks` at the
+  exact pass step, including the pass frame itself (R1.4.2). The pass is
+  evaluated inside the game's physics step, so a later poll can only observe it
+  one or more ticks late; the recorded tick therefore differs from the moment
+  the game finally leaves `PlayingLevel` by the unload delay (one or two ticks).
+
+The `Game.EnterPassZone` / `Game.Fall` hooks also latch the `LevelPassed`
+completion flag, because `Game.Fall` may clear `passedLevel` for
+Workshop/EditorPick before the poll can read it. The hooks only record ticks and
+set flags — every transition, segment, reset, and validity decision still goes
+through the single polling loop.
+
+**The `pass` boundary line.** `RecordLevelPass` emits a `pass` boundary line at
+the `Game.Fall` tick; that tick is the segment end, so `twitimer clock history`
+reports it (with `src=hook`) as the boundary the poll consumed. A `zone` line
+marks `Game.EnterPassZone`, which normally latches `LevelPassed` before
+`Game.Fall` runs.
 
 | Boundary | Hook | Recorded value |
 |---|---|---|
 | Segment start (R1.2.2) | `Game.AfterLoad` postfix | `SegmentStartTicks` (consumed by `StartSegment`) |
-| Pass flag (R1.4.2) | `Game.EnterPassZone` postfix | `LevelPassed` latch |
-| Segment end (R1.4.2) | `Game.Fall` prefix/postfix | `PendingEndTicks` — the exact pass tick |
-
-The `Game.Fall` prefix snapshots whether the call took the pass branch (the
-method itself clears `passedLevel` for Workshop/EditorPick before returning);
-the postfix latches `PendingEndTicks` and the poll freezes accumulation there.
-The hooks only record ticks and set flags — every transition, segment, reset,
-and validity decision still goes through the single polling loop, consistent
-with the rest of the engine.
+| Segment end (R1.4.1) | `Game.Fall` postfix | `PendingEndTicks` — the pass step's exact tick, including the pass frame |
+| Pass flag + `pass` tick (R1.4.2) | `Game.EnterPassZone` postfix / `Game.Fall` prefix+postfix | `LevelPassed` latch, and the diagnostic `pass` boundary line at the `Game.Fall` tick |
 
 ### Real Time clock (R1.10)
 
@@ -190,8 +203,18 @@ it keeps advancing through `LoadingLevel` screens and pauses. It is stopped (and
 the value frozen) in `TimerCore.EndSegment` at the same moment a completed run
 is recorded (R1.6), and also stopped when the run exits to a menu or lobby
 (unless a retry is in progress) so it does not silently count idle time. Full resets and one-key retries zero it along with the live
-game timers. The HUD shows the row by default below Game Time through
-`show_real_time`; the clock remains active regardless of that display setting.
+game timers. The HUD shows the row wherever the user placed it in a column
+(default below Game Time in `[column.2]`); the clock remains active regardless
+of whether the row is displayed.
+
+**Prev RT (`RunState.RealTimeAtLastSegment`)** is the real-time counterpart of
+`TotalAtLastSegment`: in `RunState.EndSegment` (only when the segment
+`completed`), the current `RealTime` value is frozen into
+`RealTimeAtLastSegment`, so the HUD row shows the run's cumulative real time at
+the moment the previous level ended (R1.10.7). It is reset/cleared by the same
+paths as `TotalAtLastSegmentTicks` (auto-reset, new run from the menu, manual
+reset) and preserved across retries. It defaults to the row directly below
+`RealTime` in the second column.
 
 ## Why retry unloads then re-launches the level
 
@@ -368,11 +391,12 @@ each physics tick the engine latches `Game.passedLevel` into `LevelPassed`
 `passedLevel` itself during the completion/leave flow, before the state flips,
 so the latch must read it beforehand). `LevelPassed` is reset on segment start.
 
-`EndSegment(completed: LevelPassed)` records `LastSegmentTicks`/`TotalAtLastSegmentTicks`,
+`EndSegment(completed: LevelPassed)` records `LastSegmentTicks`/`TotalAtLastSegmentTicks`
+(and the "Prev RT" snapshot `RealTimeAtLastSegment`),
 the tag `OnLevelExit` completion checks (R4.2,
 voiceline), and the LC last-level `LastRun` capture **only when `completed`**.
 A mid-level quit (or a retry, where `LevelPassed` is false) leaves the previous
-attempt's `LastSegmentTicks`/`TotalAtLastSegmentTicks` untouched — exactly the desired
+attempt's `LastSegmentTicks`/`TotalAtLastSegmentTicks`/`RealTimeAtLastSegment` untouched — exactly the desired
 behavior: the "last segment" reference reflects the last level you *finished*,
 not one you walked out of. Note the `PlayingLevel → LoadingLevel` edge (a
 built-in level's `StartNextLevel` reload) is inherently a completion, and there
@@ -409,19 +433,18 @@ start when the clock was running was removed: it fired mid-campaign at every
 level boundary and never on EditorPick/Workshop ends, and now `LastRun` updates
 only on these genuine completions.
 
-`LastRun` renders in its own column immediately to the right of the timer stack
-(not inside it, anchored at the main block's widest line), and only while idle
-(`!InSegment && PlayableTicks == 0`) — once a new run starts timing it hides until
-the next completion. That same right-hand column can also show the current level's **Wake Up Time**
-as its second row (gated by `show_wake_up_time`), so the per-level value stays
-visible during a run even when `LastRun` is hidden. By default the measurement
+`LastRun` is a regular HUD row like any other (defaults into `[column.3]`), and
+renders only while idle (`!InSegment && PlayableTicks == 0`) — once a new run
+starts timing it hides until the next completion. **Wake Up Time** is also a
+regular row (defaults below `LastRun`), so the per-level value stays visible
+during a run even when `LastRun` is hidden. By default the wake-up measurement
 restarts on player respawns, pause-menu checkpoint loads, and pause-menu level
 restarts; the `only_record_first_wake_up_time` setting restores the original
 level-start-to-first-wake-up behavior. It is cleared when the level ends or is
 exited. The one exception is the campaign epilogue: the game loads
 Credits (BuiltIn index == `levelCount`) as an ordinary level right after the
 final playable level is passed, and that segment is flagged
-`InEpilogueSegment` — it belongs to the run that just finished, so the column
+`InEpilogueSegment` — it belongs to the run that just finished, so the row
 stays visible through Credits (and Credits itself never records anything: it
 has no pass zone, so its segment never counts as `completed`). Credits listed as
 a level inside a collection run does NOT count as the epilogue (the run is still
@@ -430,12 +453,13 @@ active — appearing in Credits mid-collection is just an ordinary level), so
 
 ## Why auto-reset and menu entry clear the last-segment snapshots
 
-`LastSegmentTicks` and `TotalAtLastSegmentTicks` are HUD reference values for the most
+`LastSegmentTicks`, `TotalAtLastSegmentTicks` and `RealTimeAtLastSegment` are HUD reference values for the most
 recent completed segment, while `LastRunTicks` is the last completed run's total.
-**Auto-reset (R1.7) clears the live timers and the two last-segment snapshots**,
+**Auto-reset (R1.7) clears the live timers and the two last-segment snapshots**
+(plus the Prev RT snapshot, which shares their lifecycle),
 so leaving to the menu presents a fresh segment baseline, while keeping
 `LastRunTicks` as the previous completed-run reference (R1.7.4). The manual reset key
-clears all three snapshots (R1.7.1).
+clears them all (R1.7.1).
 
 `RunState.Reset(bool keepLastValues, bool keepLastRun)` keeps these concerns
 separate. The auto-reset and menu-entry paths use
@@ -451,11 +475,10 @@ through the `Retrying` flag while preserving the run's records.
 
 `ConfigRepair.Run(cfg)` runs once in `Plugin.Awake`, right after `ConfigService.Load`
 and before any subsystem reads the models. It detects and fills in missing or
-incorrect config items. Scalar settings/layout keys already self-heal to defaults
-(the parse helpers fall back to the current value), so the rules target collection
-fields that `Clear()`-then-rebuild from disk — where a newly-added default item is
-silently lost for existing users (this is how the `TotalAtLastSegment` row failed
-to appear until this system existed).
+incorrect config items. Scalar settings/layout keys self-heal to defaults
+(the parse helpers fall back to the current value); today the only rule is the
+shared-leaderboard migration (`MigrateLeaderboardFromSettings`), which copies the
+old settings.ini leaderboard keys into layout.ini `[leaderboard]` exactly once.
 
 Design: **idempotent structural checks every boot, write only when something
 changed** (a dirty-gated `ConfigService.SaveSettings`). No config-version key — a
@@ -463,14 +486,14 @@ stored version lies when a user hand-edits the file, whereas cheap structural
 checks self-heal hand-edited corruption and leave clean files untouched. It logs
 one summary line on a repair and is silent on a clean boot.
 
-The first rule, `RepairLayoutRows`, inserts any missing default HUD row when the
-user's row set looks default-derived (`IsDefaultDerived`: the rows equal the
-defaults in order, minus any missing entries). A reordered or extra/duplicate row
-set is treated as hand-customized and left untouched, with an advisory hint. The
-canonical default order lives in one place — `LayoutModel.DefaultRows` — shared by
-the `Rows` field initializer and the repair target, so the two can't drift; adding
-a new default row is a single line there. Adding a new repair concern is one
-method plus one entry in the `ConfigRepair.Rules` array.
+**The HUD layout columns are deliberately not repaired here.** The default
+layout is written exactly once, at config initialization — `ConfigService.Load`
+writes `layout.ini` when it does not exist, seeding the canonical
+`LayoutModel.DefaultColumns` (columns 1–3). Existing files are never
+auto-modified: users manage columns through the settings panel's
+Interface → Timer HUD column editor (or `twitimer layout row/column`), and legacy
+`[rows]` configs still load (mapped to `[column.1]` in memory) but are only
+rewritten in the `[column.N]` format on the next normal save.
 
 ## Building
 
@@ -524,7 +547,10 @@ Markers follow the same **poll, don't patch** principle as everything else:
   renders either the subsegment references or the marker feed based on
   `LayoutModel.LeaderboardMode`; the mode-cycle key moved from
   `SubsegmentManager` to the HUD, so the same key and appearance settings work
-  for both modes. It cycles hidden → Subsegment → Markers → hidden. Its top
+  for both modes. It cycles hidden → the available content modes → hidden; a
+  mode whose module is disabled (user setting or an auto-disable mechanism such
+  as the co-op client gate, see `AutoDisableRegistry`) is skipped, so with
+  subsegment off the cycle is only hidden ↔ Markers. Its top
   edge is fixed at the screen center (plus `layout.ini [leaderboard] offset_y`),
   so content extends downward instead of re-centering as the number of rows
   changes. The marker feed is newest-first, format `{name}: {time}` (absolute

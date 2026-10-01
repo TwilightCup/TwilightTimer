@@ -63,8 +63,6 @@ retry_level_override_enabled = false
 retry_level_override =
 show_hud = true
 show_leaderboard = true
-show_real_time = true
-show_wake_up_time = true
 only_record_first_wake_up_time = false
 center_loading_saving = false
 language = en
@@ -84,10 +82,8 @@ leaderboard_key = Tab
 | `retry_level_override` | string (English level name or Workshop numeric id) | (empty) | R6.5 — the one-key retry target. Case-insensitive name for BuiltIn/EditorPick levels, or a loaded Steam Workshop id. Invalid values show a red HUD hint when Retry is pressed and do not start a retry. When enabled and no level is active (e.g. the main menu), pressing Retry directly enters the specified level. |
 | `show_hud` | true/false | true | R2.5.1 |
 | `show_leaderboard` | true/false | true | in-match leaderboard HUD (still gated by `show_hud`; see [HUD.md](HUD.md)) |
-| `show_real_time` | true/false | true | R2.5.3 — show the always-active Real Time clock in the HUD (default shown below Game Time; can still be hidden) |
-| `show_wake_up_time` | true/false | true | Show Wake Up Time in the right-hand HUD column, below Last Run when both are visible. By default it measures from the latest wake-up-relevant moment (level start, respawn, pause-menu checkpoint load, or pause-menu level restart) to the next wake-up |
-| `only_record_first_wake_up_time` | true/false | false | R2.5.5 — restore the original Wake Up Time behavior: measure only the first wake-up after a level starts and ignore later respawns/checkpoint loads/level restarts. Visible in the settings panel only while `show_wake_up_time` is enabled |
-| `center_loading_saving` | true/false | false | Move the game's own top-right "Loading"/"Saving" progress indicator to the top-center of the screen |
+| `only_record_first_wake_up_time` | true/false | false | R2.5.5 — restore the original Wake Up Time behavior: measure only the first wake-up after a level starts and ignore later respawns/checkpoint loads/level restarts. Always shown in the settings panel (**Interface → Timer HUD**) |
+| `center_loading_saving` | true/false | false | Move the game's own top-right "Loading"/"Saving" progress indicator to the top-center of the screen (top of the Interface page) |
 | `language` | BCP-47 code | en | matches a `lang/<code>.txt` |
 | `category` | category id | any | R3.1 |
 | `reset_key` | KeyCode | Backspace | reset-run keybind |
@@ -126,6 +122,9 @@ enabled = Checkpoint, Jumpless
   `NoCheckpoint`, `Jumpless`, `Voiceline`, `Glitchless`, `NoEC`. Custom tags from
   third-party plugins use their own ids (see [EXTENDING.md](EXTENDING.md)).
   Leave empty for a plain run (generic validity checks only).
+- The auto `Co-op` label (R3.10) is managed at runtime by the engine and is
+  **never written** to `tags.ini`, so it cannot be enabled here. It turns on
+  automatically during a multiplayer session (see [CATEGORIES.md](CATEGORIES.md)).
 
 See [CATEGORIES.md](CATEGORIES.md).
 
@@ -139,10 +138,18 @@ font_size = 18
 color_a = FF5272FF
 color_b = FF9A72FF
 
-[rows]
-0 = GameTime
-1 = CurrentSegment
-2 = LastSegment
+[column.1]
+1 = GameTime
+2 = CurrentSegment
+3 = LastSegment
+
+[column.2]
+1 = RealTime
+2 = PrevRt
+
+[column.3]
+1 = LastRun
+2 = WakeUpTime
 
 [leaderboard]
 font_size = 16
@@ -158,6 +165,7 @@ markers_time_mode = Relative
 x = 400
 y = 50
 text = {date} {time}
+font_size = 16
 color_a = FFFFFFFF
 color_b = CCCCCCCF
 
@@ -178,17 +186,28 @@ seat_b_color = FF5A5AFF
   draggable). `offset_x`/`offset_y` are the pixel offset from the top-left;
   `font_size` is the font size; `color_a`/`color_b` are the default two-color
   gradient (hex, see [HUD.md](HUD.md)).
-- `[rows]` — ordered rows; keys are 0-based indices. Row types: `GameTime`,
-  `RealTime`, `CurrentSegment`, `LastSegment`, `LastRun`, `CurrentState`.
-  `RealTime` is also gated by the `show_real_time` setting (default on).
-  Wake Up Time is not a row type — it renders in the right-hand column next to
-  Last Run and is gated by `show_wake_up_time`.
+- `[column.<n>]` — one column of rows; each key is the row's **1-based
+  position** within the column (drawn top-to-bottom; positions must be unique
+  and `0` is never written).
+  Columns are drawn left-to-right by number (`[column.1]` leftmost); an empty
+  column is not displayed. The default file (written once on a fresh install)
+  has `[column.1]` (`GameTime` / `CurrentSegment` / `TotalAtLastSegment` /
+  `LastSegment`), `[column.2]` (`RealTime` / `PrevRt`, `PrevRt` directly below
+  `RealTime`) and `[column.3]` (`LastRun` / `WakeUpTime`). Row types:
+  `GameTime`, `RealTime`, `PrevRt`, `CurrentSegment`, `TotalAtLastSegment`,
+  `LastSegment`, `LastRun`, `WakeUpTime`, `CurrentState`. Every row type —
+  including `RealTime`, `LastRun` and `WakeUpTime` — is a regular row: it shows
+  wherever you place it, so the old `show_real_time` / `show_wake_up_time`
+  settings are gone. Old `[rows]` configs still load (mapped to `[column.1]` in
+  memory) and are rewritten in the `[column.N]` format on the next save;
+  nothing is migrated or auto-modified at boot.
 - `[leaderboard]` — the shared leaderboard HUD (Subsegment / Markers modes).
   `font_size`, `offset_x`, `offset_y`, `color_faster`, `color_slower`,
   `color_tie`, `mode`, and `markers_time_mode` control its appearance and
   display mode. `offset_y` is relative to the fixed top anchor at the screen
   center; content extends downward.
-- `[custom.<n>]` — arbitrary on-screen texts at `(x, y)` with their own gradient.
+- `[custom.<n>]` — arbitrary on-screen texts at `(x, y)` with their own gradient
+  and font size (`font_size`, default `16`).
   Template variables: `{date}`, `{time}`, `{version}`, `{collection}`,
   `{category}`, `{gametime}`, `{realtime}`.
 - `[leaderboard]` — the in-match leaderboard (left-edge-centre anchor; see
@@ -229,9 +248,9 @@ DisabledLeaderboardSources =
 | `Enable` | true | Master switch; disables sampling, loading, and the leaderboard. |
 | `PBPath` | `subsegment/pb` | Relative paths resolve under `<config>/TwilightTimer/`; absolute paths are accepted. Created automatically when a PB is written. |
 | `LoadPath` | `subsegment/load` | Manually-placed reference samples. The directory is created automatically when the plugin loads, so it is ready for dropping reference samples into it. |
-| `ToggleKey` | `Tab` | Cycle the shared leaderboard: hidden → Subsegment → Markers → hidden. Disabled for the whole match session — the shared leaderboard then follows the in-match leaderboard instead (T7.6). |
+| `ToggleKey` | `Tab` | Cycle the shared leaderboard: hidden → available content modes → hidden. A mode whose module is disabled — by the user's setting or by an auto-disable mechanism (e.g. the co-op client gate) — is skipped, so e.g. with subsegment off the cycle is only hidden ↔ Markers. Disabled for the whole match session — the shared leaderboard then follows the in-match leaderboard instead (T7.6). |
 | `MultiProject` | `Any%` | Initial multi-run project used for live ML comparisons (`Aztec%`/`Dark%`/`Steam%`/`Any%`). Within a session it can auto-upgrade along the containment chain (Aztec% → Dark% → Steam% → Any%) without writing back to config; if the chosen project has no data at all, it falls back to the smallest project that has data (session-only). PB writes still use the actual last-completed endpoint. |
-| `PlaneRadius` | `50.0` | Virtual detection-plane radius in meters. |
+| `PlaneRadius` | `50.0` | Virtual detection-plane radius in meters. Applied when references are loaded and their planes are built, so it also governs existing PB/load samples (their files no longer carry a per-sample radius). |
 | `MinMove` | `0.5` | Minimum sampled move distance; smaller moves become zero-displacement samples and do not build planes. |
 | `SampleInterval` | `1.0` | Game-time seconds between subsegment samples. |
 | `QuietSettleSeconds` | `0.5` | Quiet settle window for crossing candidates. |

@@ -47,10 +47,11 @@ namespace TwilightTimer
 
         /// <summary>
         /// Exact end tick of the current segment, latched by the authoritative
-        /// pass-zone boundary hook (TB-3), or null when no pass has been
-        /// recorded. Once set, the poll freezes accumulation so the segment
-        /// ends on the hook's tick, not on the frame the state flip happens to
-        /// be observed.
+        /// boundary hook, or null when the end has not been observed yet. The
+        /// latch comes from the <c>Game.Fall</c> pass-zone boundary hook.
+        /// Once set, the poll freezes accumulation so the segment ends on the
+        /// hooked tick rather than on the frame the poll happens to notice the
+        /// state flip.
         /// </summary>
         public ulong? PendingEndTicks;
 
@@ -73,6 +74,16 @@ namespace TwilightTimer
 
         /// <summary>Pause wall time at the instant the last segment ended.</summary>
         public double TotalAtLastSegmentPause;
+
+        /// <summary>
+        /// Snapshot of <see cref="RealTime"/> at the instant the most recently
+        /// completed segment ended, or null. The real-time counterpart of
+        /// <see cref="TotalAtLastSegmentTicks"/> (the run's game-time total at
+        /// that moment): like it, this is the run's cumulative real time frozen
+        /// at the previous level's end — not the segment's own real duration.
+        /// Snapshotted in <see cref="EndSegment"/>.
+        /// </summary>
+        public double? RealTimeAtLastSegment;
 
         /// <summary>Total game ticks of the most recently completed run, or null.</summary>
         public ulong? LastRunTicks;
@@ -183,7 +194,7 @@ namespace TwilightTimer
 
         /// <summary>
         /// When set, the current completion flow must NOT persist subsegment /
-        /// marker PBs. Set by the <c>hsr pass</c> test command (a simulated
+        /// marker PBs. Set by the <c>twitimer pass</c> test command (a simulated
         /// level pass that should not pollute real PB data); the segment is
         /// still recorded normally (LastSegment / LastRun), only the PB write
         /// paths are skipped. Cleared on segment start and on any full reset.
@@ -324,6 +335,7 @@ namespace TwilightTimer
                 LastSegmentPause = 0d;
                 TotalAtLastSegmentTicks = null;
                 TotalAtLastSegmentPause = 0d;
+                RealTimeAtLastSegment = null;
             }
             if (!keepLastRun)
             {
@@ -399,9 +411,10 @@ namespace TwilightTimer
         /// is active (avoids recording a garbage segment from a stale transition
         /// cache, e.g. across a Game.instance null window).
         /// <para><paramref name="endTicks"/> is the segment's exact end tick:
-        /// the pass-zone boundary hook's value when one was latched (TB-3), else
-        /// the polled <see cref="PlayableTicks"/>. The run total is normalized
-        /// to it so a pass that the poll had not yet counted is still included.</para>
+        /// the authoritative boundary hook's value when one was latched (TB-3,
+        /// the <c>Game.Fall</c> pass hook), else the polled
+        /// <see cref="PlayableTicks"/>. The run total is normalized to it so a
+        /// pass that the poll had not yet counted is still included.</para>
         /// </summary>
         public void EndSegment(ulong endTicks, double endPause, bool completed)
         {
@@ -412,6 +425,7 @@ namespace TwilightTimer
                 LastSegmentPause = endPause >= SegmentStartPause ? endPause - SegmentStartPause : 0d;
                 TotalAtLastSegmentTicks = endTicks;
                 TotalAtLastSegmentPause = endPause;
+                RealTimeAtLastSegment = RealTime;
             }
             PlayableTicks = endTicks;
             PauseAccum = endPause;

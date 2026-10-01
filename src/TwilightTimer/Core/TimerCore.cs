@@ -8,10 +8,11 @@ namespace TwilightTimer
     /// The timer engine. A single polling MonoBehaviour drives all timing,
     /// segment, reset, validity, and tag logic each frame by reading public
     /// game fields. The only exceptions are the precise start/end boundary
-    /// hooks (see <see cref="RecordSegmentStart"/>/<see cref="RecordLevelPass"/>
+    /// hooks (see <see cref="RecordSegmentStart"/> / <see cref="RecordLevelPass"/>
     /// and docs/ARCHITECTURE.md): they record the exact tick where the game
-    /// flips state inside its own physics step, which a poll can only observe
-    /// a tick late.
+    /// flips state inside its own physics step, which a poll can only observe a
+    /// tick late. The segment-end tick is latched at the <c>Game.Fall</c> pass
+    /// detection (R1.4.2).
     ///
     /// <see cref="FixedUpdate"/>: accumulation + state-transition detection
     /// (Appendix B) + per-tick tag rules on segment end.
@@ -45,7 +46,7 @@ namespace TwilightTimer
         private double _segmentStartPause;
 
         // Ring buffer of recent segment-start/end boundaries, exposed through
-        // 'hsr clock history' so repeated loads/passes can be checked for zero
+        // 'twitimer clock history' so repeated loads/passes can be checked for zero
         // tick jitter (TB-5).
         private const int BoundaryLogCapacityConst = 200;
         private static readonly List<string> BoundaryEntries = new List<string>();
@@ -152,6 +153,13 @@ namespace TwilightTimer
             // Drain externally-enqueued actions (T1.4 marshaling).
             MainThreadQueue.Drain();
 
+            // Auto label tags (R3.10): the Co-op label follows the live game
+            // mode every frame — on during a multiplayer session
+            // (NetGame.isServer/isClient), off in single-player. Label tags are
+            // never persisted (EnabledTagsModel.Save filters them out) and carry
+            // no rule, so this only affects the enabled-tag display surfaces.
+            SyncAutoLabels();
+
             GameState gState = Game.instance != null ? Game.instance.state : GameState.Inactive;
 
             // Generic always-on validity check (R5.1): cheat codes.
@@ -159,7 +167,7 @@ namespace TwilightTimer
 
             // B.2 pause supplement (always on; runs here because FixedUpdate is
             // paused when timeScale=0). Pause time is wall-clock, the one
-            // non-tick game-time component (R1.8.3/TB-6). Once a pass boundary
+            // non-tick game-time component (R1.8.3/TB-6). Once the pass tick
             // has been latched the run's game clock is already frozen, so a
             // pause in the short post-pass window must not extend it either.
             if (!State.PendingEndTicks.HasValue
@@ -391,9 +399,9 @@ namespace TwilightTimer
             if (!State.InSegment)
                 return;
 
-            // TB-3: use the pass-zone hook's exact end tick when one was
-            // latched; otherwise (a mid-level quit, which records nothing) fall
-            // back to the polled tick.
+            // Use the exact end tick latched by the Game.Fall pass boundary hook
+            // when one was recorded; otherwise fall back to the polled tick
+            // (e.g. a mid-level quit, which latches nothing).
             ulong endTicks = State.PendingEndTicks ?? State.PlayableTicks;
             double endPause = State.PendingEndTicks.HasValue ? State.PendingEndPause : State.PauseAccum;
             double end = GameClock.Seconds(endTicks, endPause);
@@ -539,10 +547,9 @@ namespace TwilightTimer
         // ── Accumulation (B.1) ─────────────────────────────────────────────
         private void Accumulate(Game game, GameState gState, AppSate aState)
         {
-            // Once the pass hook has latched the segment's exact end tick the
-            // game clock is frozen at it, even though the state may stay
-            // PlayingLevel for a few more physics steps while the game starts
-            // the load (TB-3).
+            // Once the Game.Fall pass hook has latched the segment's exact end
+            // tick the game clock is frozen at it, even though the state may
+            // stay PlayingLevel for the rest of the physics step.
             if (State.PendingEndTicks.HasValue)
                 return;
             if (SegmentLogic.ShouldAccumulateFixed(gState, aState, State.TimingActive))
@@ -684,6 +691,35 @@ namespace TwilightTimer
         }
 
         /// <summary>
+        /// Keep label-only tags (<see cref="TagLabels"/>, R3.10) in sync with the
+        /// live game mode. The Co-op label is enabled only while a multiplayer
+        /// session is active (<c>NetGame.isServer</c> or <c>NetGame.isClient</c>)
+        /// and removed as soon as the player is back in single-player. It carries
+        /// no rule and no validity flag (nothing in the rule pipeline references
+        /// it), and it is never persisted — this only turns the label on/off on
+        /// the enabled-tag display surfaces (HUD tags line, {category}).
+        /// Called every frame from <see cref="Update"/>.
+        /// </summary>
+        private void SyncAutoLabels()
+        {
+            var tags = _cfg != null ? _cfg.EnabledTags : null;
+            if (tags == null) return;
+            bool coop = CoopLabelOverride ?? (NetGame.isServer || NetGame.isClient);
+            if (coop)
+                tags.Enable(TagLabels.Coop);
+            else
+                tags.Disable(TagLabels.Coop);
+        }
+
+        /// <summary>
+        /// Session-only override for the Co-op auto label (R3.10), set by the
+        /// dev console ('twitimer tag label on|off|auto') so the label's display can
+        /// be tested without an actual multiplayer session (mirrors the 'twitimer
+        /// flags raise' test tool). Null = follow the live game mode (default).
+        /// </summary>
+        public static bool? CoopLabelOverride;
+
+        /// <summary>
         /// Public entry point used by the in-game dev console to perform the
         /// same full-run reset as the reset key.
         /// </summary>
@@ -762,23 +798,22 @@ namespace TwilightTimer
         /// <summary>
         /// Latch the authoritative segment-end tick after the game has detected
         /// a genuine level pass (<c>Game.Fall</c> taking the <c>passedLevel</c>
-        /// branch, R1.4.2). The tick is the step's exact index, including the
-        /// pass step itself ("终点含最后一帧", TB-4); the poll then freezes
-        /// accumulation at it and records the segment on the observed state
-        /// flip. Suppressed under <c>Retrying</c> (R6) and outside a segment, so
-        /// an abandoned attempt never ends a segment (TB-7).
+        /// branch, R1.4.2), and log the pass step for diagnostics. The tick is
+        /// the step's exact index, including the pass step itself ("终点含最后一帧",
+        /// TB-4); the poll then freezes accumulation at it and records the
+        /// segment on the observed state flip. Suppressed under <c>Retrying</c>
+        /// (R6) and outside a segment, so an abandoned attempt never ends a
+        /// segment (TB-7).
         /// </summary>
         public static void RecordLevelPass()
         {
-            var core = Instance;
             var st = State;
-            if (core == null || st == null)
+            if (st == null)
                 return;
             if (!st.InSegment || st.Retrying)
                 return;
             if (st.PendingEndTicks.HasValue)
                 return;
-
             st.LevelPassed = true;
             // The hook can run before or after this plugin's FixedUpdate within
             // the same physics step. When it runs first, the pass step has not
@@ -802,14 +837,15 @@ namespace TwilightTimer
 
         /// <summary>
         /// Latch only the completion flag (used by the <c>Game.EnterPassZone</c>
-        /// postfix, R1.4.2). The segment's end tick is recorded later, at the
-        /// authoritative <c>Game.Fall</c> pass detection.
+        /// postfix, R1.4.2).
         /// </summary>
         public static void LatchLevelPassed()
         {
             var st = State;
-            if (st != null && st.InSegment)
-                st.LevelPassed = true;
+            if (st == null || !st.InSegment || st.LevelPassed)
+                return;
+            st.LevelPassed = true;
+            LogBoundary($"zone  level={st.CurrentLevelNumber} tick={st.PlayableTicks} step={GameClock.CurrentTick}");
         }
 
         private void DoFullReset(bool keepLastValues, bool keepLastRun = false)

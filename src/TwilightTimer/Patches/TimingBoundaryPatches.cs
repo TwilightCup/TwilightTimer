@@ -54,16 +54,14 @@ namespace TwilightTimer
 
     /// <summary>
     /// Harmony prefix/postfix on <c>Game.Fall(HumanBase, bool, bool)</c>: the
-    /// point where the game detects a genuine level completion and enters the
-    /// loading/leave path (R1.4.2). The prefix snapshots whether this call took
-    /// the pass branch (the method itself may clear <c>passedLevel</c> for
-    /// Workshop/EditorPick before returning); the postfix then latches the exact
-    /// end tick via <see cref="TimerCore.RecordLevelPass"/>.
-    /// <para>
-    /// This is the deliberate exception to "poll, don't patch" documented in
-    /// ARCHITECTURE.md: the pass is evaluated inside the game's physics step, so
-    /// a later poll can only observe it one or more ticks late.
-    /// </para>
+    /// point where the game detects a genuine level completion (R1.4.2). The
+    /// prefix snapshots whether this call took the pass branch (the method
+    /// itself may clear <c>passedLevel</c> for Workshop/EditorPick before
+    /// returning); the postfix then calls <see cref="TimerCore.RecordLevelPass"/>,
+    /// which latches the exact end tick here — this is the deliberate exception
+    /// to "poll, don't patch" documented in ARCHITECTURE.md: the pass is
+    /// evaluated inside the game's physics step, so a later poll can only
+    /// observe it one or more ticks late.
     /// </summary>
     [HarmonyPatch(typeof(Game), nameof(Game.Fall))]
     internal static class GameFallBoundaryPatch

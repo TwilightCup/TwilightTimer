@@ -52,15 +52,17 @@ persist to the normal `settings.ini` / `tags.ini` / `layout.ini` files.
 | `twitimer hud [on\|off\|toggle\|status]` | Control timer HUD visibility |
 | `twitimer panel [open\|close\|toggle\|status]` | Control the settings panel |
 | `twitimer leaderboard [cycle\|show\|hide\|mode <Subsegment\|Markers>\|status]` | Control the leaderboard HUD |
-| `twitimer layout [status\|row ...\|text ...\|get <key>\|set <key> <value>]` | Inspect/edit the HUD layout |
-| `twitimer tag [list\|enable <id>\|disable <id>\|set <id> <on\|off>]` | Toggle enabled tag rules |
+| `twitimer layout [status\|row ...\|column ...\|text ...\|get <key>\|set <key> <value>]` | Inspect/edit the HUD layout (columns use 1-based row positions) |
+| `twitimer tag [list\|label <status\|on\|off\|auto>\|enable <id>\|disable <id>\|set <id> <on\|off>]` | Toggle enabled tag rules; inspect/force the auto Co-op label |
 | `twitimer lang [list\|set <code>\|reload\|current]` | Manage localization |
 | `twitimer preset [list\|current\|create <name>\|apply [name]\|save\|delete <name>]` | Manage presets (R11) |
-| `twitimer sub [status\|entries\|clear]` | Inspect/clear the subsegment module |
-| `twitimer marker [list\|feed\|add ...\|remove <id>\|toggle <id>\|pb <ms>\|pbclear\|clear\|save\|reload]` | Inspect/edit markers (R10) |
+| `twitimer sub [status\|entries\|clear\|clientmode <status\|on\|off\|auto>]` | Inspect/clear the subsegment module; inspect/force the co-op client gate |
+| `twitimer marker [list\|feed\|add ...\|remove <id>\|toggle <id>\|clientmode <status\|on\|off\|auto>\|pb <ms>\|pbclear\|clear\|save\|reload]` | Inspect/edit markers (R10); inspect/force the co-op PB role |
 | `twitimer flags [list\|raise <Reason>\|clear [forgivable\|soft\|all]]` | Inspect/mutate validity flags (R5) |
 | `twitimer lc [status\|restart]` | Inspect LevelCollections integration or dispatch `lc restart` |
 | `twitimer config [path\|files\|source [status\|hsrtimer\|twilighttimer\|toggle]]` | Print TwilightTimer config paths or switch the config source directory |
+| `twitimer about` | Print plugin name, version, license notice, and repository URL (R12) |
+| `twitimer update [status\|check\|apply\|cancel\|base [url]]` | Check for / install plugin updates from GitHub releases (R13) |
 | `twitimer match [status\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|segments\|leaderboard\|penalty]` | Drive Twilight Cup match mode / round lifecycle through `TwilightTimerApi` (synchronous debug surface) |
 | `twitimer sim [status\|drain\|enter\|exit\|start ...\|resume ...\|stop\|tags ...\|resolvetag ...\|events ...]` | Drive the registered `ITimerProvider` adapter, resolve server tag strings, and mirror its outbound events to the log |
 
@@ -71,7 +73,7 @@ and `LayoutModel`. Common examples:
 
 - `auto_reset`, `restart_clears_forgivable`, `retry_min_dwell`
 - `retry_level_override_enabled`, `retry_level_override`
-- `show_hud`, `show_real_time`, `show_wake_up_time`
+- `show_hud`
 - `only_record_first_wake_up_time`, `center_loading_saving`, `language`
 - `reset_key`, `retry_key`, `menu_key`
 - `subsegment_enable`, `subsegment_pb_path`, `subsegment_load_path`,
@@ -118,6 +120,13 @@ an active segment with a local player and is a no-op for clients / during
 replays. **Subsegment and marker PBs are deliberately not written** (it is a
 test pass), so real PB files stay untouched.
 
+**Prev RT (R1.10.7).** After a level completes, `twitimer status` shows a frozen
+`prevRt=` (the Real Time value at that level's end) and the HUD's `Prev Rt`
+row (Chinese `上关RT`) updates to the same value — the run's cumulative Real
+Time, not the level's own duration. Before the first completed level it reads
+`--` (unset). It is cleared by `twitimer reset` and by leaving to the menu, but
+kept across `twitimer retry`.
+
 `twitimer pass real` exercises the actual trigger chain instead of forcing the
 flag: it zeroes the player's momentum (linear + angular on every body part),
 releases both hand grabs, and teleports the local player to the center of the
@@ -129,19 +138,25 @@ latched, the level's pass trigger could not be entered (collider/tag/layout).
 
 **Boundary determinism (R1.11).** `twitimer clock` prints the raw integer tick clock
 (`playableTicks`, `segmentStartTicks`, `pendingEndTicks`, …). `twitimer clock
-history` lists each segment start/end tick: load + finish a level 50 times and
-the `dur=` (end tick − start tick) for the same level and same inputs must be
-**identical** every time (zero ±1 jitter). `twitimer clock clear` resets the history
-before a measurement run.
+history` lists each segment start/end tick. Both boundaries are latched by
+authoritative hooks, so they do not depend on the polling loop's cadence or on
+Unity script execution order: `load` is the `Game.AfterLoad` start tick, and the
+`pass` line (the `Game.Fall` pass detection) carries the latched end tick,
+including the pass frame itself.
 
-Each history `end` line carries two diagnostics: `src=hook|poll` says whether
-the precise `Game.Fall` boundary hook fixed the end tick (a genuine completion)
-or the polling loop recorded it (a mid-level quit), and `step=` is the global
-physics step it was observed on. A `pass` line marks the authoritative pass
-tick. Together they show that physics steps between the pass and the observed
-state flip are **not** counted into the segment — the source of the old ±1.
+Load + finish a level 50 times and the `dur=` (end tick − start tick) for the
+same level and same inputs must be **identical** every time (zero ±1 jitter).
+`twitimer clock clear` resets the history before a measurement run. Each history
+`end` line carries `src=hook` when a latched end tick was used and `step=`, the
+global physics step on which the poll consumed it; the segment value therefore
+stays independent of poll timing.
 
-The same pair exists on the start side: `load` is the `Game.AfterLoad` hook frame
+The `pass` line is the `Game.Fall` pass detection tick (with `processed=` telling
+whether the engine's `FixedUpdate` had already run for that physics step); that
+tick is the segment end. A `zone` line marks `Game.EnterPassZone`, which normally
+latches `LevelPassed` *before* `Game.Fall` runs.
+
+The start side works the same way: `load` is the `Game.AfterLoad` hook frame
 (the authoritative segment start) and the following `start` line is the polling
 loop consuming that latch. A `start tick` equal to `load tick` with a larger
 `step=` proves the start boundary no longer depends on when the poll noticed it.
@@ -153,13 +168,16 @@ twitimer flags list
 twitimer flags raise CheatCode            # unforgivable
 twitimer flags raise CheckpointSkip       # forgivable
 twitimer flags raise Ec                   # soft, increments count
+twitimer flags raise Ssg                  # soft (Glitchless), increments count
+twitimer flags raise PropFly              # soft (Glitchless), increments count
+twitimer flags raise Footsie              # soft (Glitchless), increments count
 twitimer flags clear forgivable
 twitimer flags clear soft
 twitimer flags clear all
 ```
 
 `twitimer status` should show the hard reasons in the `flags:` line and soft flags
-as `Ec xN`.
+as `Ec xN` / `Ssg xN` etc.
 
 ### 3. Tags / category (R3)
 
@@ -175,6 +193,31 @@ twitimer status          # enabled tags are listed
 
 Tag changes persist to `tags.ini` immediately.
 
+**Auto label `Co-op` (R3.10).** `twitimer tag list` shows label tags on their own
+`labels (auto):` line with their live state — `Co-op [on]` only while a
+multiplayer session is active (`server=` / `client=` in `twitimer status`), `[off]`
+in single-player. The label cannot be toggled like a rule tag:
+
+```text
+twitimer tag set Co-op on      # rejected: "is an auto label ... cannot be toggled manually"
+```
+
+To test the label's display without an actual multiplayer session, force it
+with `twitimer tag label` (session-only; `auto` restores the multiplayer-driven
+state):
+
+```text
+twitimer tag label status      # effective / net / override
+twitimer tag label on          # force the label on (HUD tags line + {category} show "Co-op")
+twitimer tag label off
+twitimer tag label auto        # back to auto (on only while in multiplayer)
+```
+
+Verify the real cycle: host or join a co-op game → `twitimer tag list` shows
+`Co-op [on]` and the HUD "Tags" line / `{category}` template include
+"Co-op" (English UI) / "多人" (Chinese UI); leave the session → it turns `[off]` again. The label is never
+persisted: `twitimer get all` (tags section) and `tags.ini` never contain `Co-op`.
+
 ### 4. HUD / layout (R2)
 
 ```text
@@ -182,17 +225,56 @@ twitimer hud off
 twitimer hud on
 twitimer layout status
 twitimer layout row list
-twitimer layout row add CurrentState
-twitimer layout row remove 5
+twitimer layout row add 1 CurrentState
+twitimer layout row add 1 CurrentState 2
+twitimer layout row remove 1 2
+twitimer layout row add 2 RealTime
+twitimer layout row add 2 PrevRt
+twitimer layout row clear 2
+twitimer layout column list
+twitimer layout column new
+twitimer layout row add 4 WakeUpTime
+twitimer layout column remove 4
 twitimer layout text add 20 400 "Hello {gametime}"
 twitimer layout text list
+twitimer layout text set 0 x 320
+twitimer layout text set 0 y 240
+twitimer layout text set 0 font_size 24
+twitimer layout text set 0 text "Level: {category}"
+twitimer layout text set 0 color_a 00FF00FF
+twitimer layout text set 0 color_b 0000FFFF
+twitimer layout text remove 0
 twitimer layout set font_size 24
 twitimer layout set offset_x 30
 twitimer layout set color_a FF0000FF
 ```
 
 The HUD should update on the next frame and the changes should persist to
-`layout.ini`.
+`layout.ini`. `layout.ini` `[column.N]` keys are 1-based row positions.
+`PrevRt` is a valid row type for `twitimer layout row add` (the previous level's
+Real Time snapshot; it shows `--:--` until the first level is completed), as
+are `LastRun` and `WakeUpTime` — every row type is a regular column row now, and
+`show_real_time` / `show_wake_up_time` are no longer settings (`twitimer set` no
+longer lists them). `twitimer layout row add <column> <type> [position]` appends at
+the end when the position is omitted; `twitimer layout column new` appends an empty
+column and `twitimer layout column remove <n>` deletes one. `twitimer layout text set
+<index> <x|y|text|font_size|color_a|color_b> <value>` edits one field of an
+existing custom text (the text value may contain spaces).
+
+The settings panel's **Interface** page mirrors this editor: **Center
+Loading/Saving** at the top, then the **Timer HUD** button (Chinese:
+`计时器HUD`) opens the sub-page with **HUD general settings** (Show timer HUD,
+Offset, Font size, Color, and Only-record-first-wake-up) and one collapsible
+**Column N** dropdown per column listing every row type with an integer
+**position** field (`0` = hidden, `N > 0` = the N-th line), a per-column
+**Delete** button (with confirmation), and a **New column** button at the
+bottom. The same page also has a **Leaderboard** button that opens the shared
+leaderboard HUD sub-page (content mode, HUD size/offset, entry colors, marker
+time display, and the subsegment source toggles) and a **Custom Text** button
+(Chinese: `自定义文本`) that opens a sub-page listing every custom text as a
+collapsible dropdown (Content box, Font size, Offset X/Y, Color A/B, **Delete**
+with confirmation) plus a **New text** button at the bottom, each with a **Back**
+button at the top.
 
 ### 5. Settings panel / general settings
 
@@ -243,14 +325,43 @@ twitimer sub entries
 twitimer sub clear
 ```
 
-`twitimer sub status` prints the enabled flag, paths, multi-run state and current
-leaderboard entry count. `twitimer sub entries` lists each loaded reference and its
-latest settled diff.
+`twitimer sub status` prints the enabled flag, co-op gate state, paths, multi-run
+state and current leaderboard entry count. `twitimer sub entries` lists each loaded
+reference and its latest settled diff.
+
+**Co-op gate (R8.10).** As a multiplayer client the module is disabled entirely
+(`active=off`, `coopClientGate=on` in `twitimer sub status`); as the host it runs
+normally using only your own (host) character. Without a real client session,
+force the gate with `twitimer sub clientmode` (session-only; `auto` restores):
+
+```text
+twitimer sub clientmode status    # effective / net / override
+twitimer sub clientmode on        # treat as co-op client -> subsegment disabled
+twitimer sub clientmode off       # treat as host/single-player -> normal
+twitimer sub clientmode auto      # back to auto (disabled only when NetGame.isClient)
+```
+
+Verify: `twitimer sub clientmode on` then `twitimer sub status` shows `active=off,
+coopClientGate=on` (and the new auto-disable fields `userEnabled=on
+autoDisabled=on autoReasons=coop-client`) and the leaderboard shows no
+subsegment content even while in a level; `twitimer sub clientmode off` restores
+sampling/detection. A real co-op session behaves the same on the client's
+machine automatically.
+
+**User vs auto disable (R8.5.1.5).** `twitimer sub status` reports the user's
+`Subsegment.Enable` setting (`enable` / `userEnabled`) separately from any
+auto-disable source (`autoDisabled` / `autoReasons`). For example
+`twitimer set subsegment_enable false` gives `userEnabled=off autoDisabled=off`,
+while `twitimer sub clientmode on` gives `userEnabled=on autoDisabled=on
+autoReasons=coop-client` — the two axes are independent, and either one makes
+the module inactive (`active=off`).
 
 `twitimer sub status` also reports the match gate:
 `enable=<user setting> matchSuppressed=<bool> effective=<bool>
 samplingAllowedForLevel=<bool>`. The `effective` value is what the module
-actually obeys.
+actually obeys. Matching the auto-disable interface (R8.5.1.5), an active match
+is registered as the `match` source, so it also shows up as
+`autoDisabled=on autoReasons=match`.
 
 **Match suppression (T7.5 / R8.9).** While a match is active the local subsegment
 is disabled automatically:
@@ -275,6 +386,7 @@ written for a level that was suppressed at any point.
 Enter a level, then:
 
 ```text
+twitimer marker status
 twitimer marker list
 twitimer marker add range "Test Box"          # uses player position, 2m box
 twitimer marker add checkpoint "CP1" 1
@@ -287,6 +399,13 @@ twitimer marker reload
 twitimer marker clear
 ```
 
+`twitimer marker status` reports the module's enable/availability state: the
+user's `Markers.Enable` setting (`enable` / `userEnabled`), any active
+auto-disable sources (`autoDisabled` / `autoReasons`, none today), the
+combined `active` flag, the co-op PB role (`pbWrite`), and the current feed
+size. `twitimer set markers_enable false` turns `userEnabled=off` while
+`autoDisabled` stays off — the two axes are independent (R8.5.1.5).
+
 The marker overlay/feed should react to these changes when edit mode is enabled
 (`twitimer set markers_edit_mode true`).
 
@@ -295,6 +414,27 @@ level and the next attempt starts — including when the next level is the same
 level again (a repeated campaign level) — `twitimer marker feed` should list only the
 new attempt's rows. The new attempt's first trigger replaces the previous
 attempt's stale rows instead of appending to them.
+
+**Co-op behavior (R10.10).** In a multiplayer session any player can trigger a
+marker (both host and client evaluate all players), and marker PB writes are
+host-only: a co-op client never persists a PB (`twitimer marker list` shows
+`pbWrite=disabled (co-op client, host-only)`, and `twitimer marker pb` is
+rejected). Force the role without a real client session with `twitimer marker
+clientmode` (session-only; `auto` restores):
+
+```text
+twitimer marker clientmode status   # role / pbWrite / net / override
+twitimer marker clientmode on       # treat as co-op client -> PB writes blocked
+twitimer marker clientmode off      # treat as host/single-player -> PB writes allowed
+twitimer marker clientmode auto     # back to auto (blocked only when NetGame.isClient)
+```
+
+Verify: `twitimer marker clientmode on` then `twitimer marker list` shows
+`pbWrite=disabled...` and `twitimer marker pb 12345` is rejected; `twitimer marker
+clientmode off` restores them. The "any player can trigger" part needs a real
+co-op session: with two players in the level, a marker triggers when either
+player enters its box / grabs its object, and `twitimer marker feed` lists it on
+both machines.
 
 ### 9. Localization (R7)
 
@@ -317,6 +457,18 @@ twitimer leaderboard mode Subsegment
 twitimer leaderboard hide
 twitimer leaderboard cycle
 ```
+
+**Mode-cycle skips disabled modes (R8.5.1.2).** `twitimer leaderboard status` shows
+the current `mode` and the `available` modes (user-enabled and not
+auto-disabled). With both modules on, `cycle` walks hidden → Subsegment →
+Markers → hidden. Disable subsegment (`twitimer sub clientmode on`, or
+`twitimer set subsegment_enable false`) and `cycle` now walks hidden → Markers →
+hidden only: from hidden it goes straight to Markers (never Subsegment), and
+from Markers it hides. Disable both and `cycle` stays hidden. The same applies
+when markers is the disabled side (`twitimer set markers_enable false`): the cycle
+becomes hidden ↔ Subsegment. A mode that is currently shown but became
+unavailable (e.g. the leaderboard is in Subsegment mode when the co-op client
+gate turns on) draws nothing, and the next `cycle` press hides it.
 
 ### 11. LevelCollections integration (optional)
 
@@ -517,20 +669,23 @@ twitimer match exit
 - [ ] `twitimer` prints the command summary.
 - [ ] `twitimer status` shows plausible live values while in a level.
 - [ ] `twitimer reset` zeroes timers and clears flags.
-- [ ] `twitimer clock` shows integer ticks and `twitimer clock history` records identical `dur=` for repeated identical runs (R1.11).
+- [ ] `twitimer clock` shows integer ticks and `twitimer clock history` records identical `dur=` for repeated identical runs (R1.11); the `pass` line (the `Game.Fall` pass detection) carries the segment's end tick.
 - [ ] `twitimer retry` reloads the current level (or the configured override).
-- [ ] `twitimer pass` completes the current level; `twitimer status` shows the recorded segment and (on the final level) `lastRun`, and no subsegment/marker PB file changed.
+- [ ] `twitimer pass` completes the current level; `twitimer status` shows the recorded segment, a frozen `prevRt` (the Real Time at that level's end) and (on the final level) `lastRun`, and no subsegment/marker PB file changed.
 - [ ] `twitimer pass real` teleports the player into the pass zone and the game's own trigger flow completes the level (with `LevelPassed` latched); PBs still not written.
 - [ ] `twitimer hud off/on` hides/shows the timer HUD.
 - [ ] `twitimer panel open/close` opens/closes the settings panel.
 - [ ] The About tab (first in the navigation) shows name/version/license and the repository button; `twitimer about` matches it.
 - [ ] `twitimer update check` reports up to date / shows a newer release / shows a one-line error (offline), and `twitimer update apply` installs the DLL (R13).
 - [ ] `twitimer tag enable/disable` changes the enabled tags and persists them.
+- [ ] `twitimer sub clientmode on` reports `active=off coopClientGate=on` and the leaderboard drops subsegment; `twitimer sub clientmode auto` restores it (R8.10).
 - [ ] `twitimer set language zh-Hans` switches UI language.
-- [ ] `twitimer layout row add/remove` changes the HUD rows.
+- [ ] `twitimer layout row list/add/remove/clear` changes the HUD rows (per 1-based position), including adding `PrevRt`, `LastRun` and `WakeUpTime`.
+- [ ] `twitimer layout column new/remove` appends/deletes columns, and `twitimer set show_real_time` / `show_wake_up_time` are no longer accepted (the rows are column positions now).
+- [ ] `twitimer layout text add/list/set/remove/clear` manages custom texts; the panel's **Interface → Custom Text** sub-page lists each text as a dropdown (content, font size, offsets, colors) with a **Delete** (confirm) and a **New text** button.
 - [ ] `twitimer preset create/save/apply` round-trips layout + markers.
 - [ ] `twitimer sub status/entries` works with subsegment data present.
-- [ ] `twitimer match enter` disables subsegment (`matchSuppressed=true`, `effective=false`) and hides its leaderboard; `twitimer match exit` restores the setting.
+- [ ] `twitimer match enter` disables subsegment (`matchSuppressed=true`, `effective=false`, `autoReasons=match`) and hides its leaderboard; `twitimer match exit` restores the setting.
 - [ ] `twitimer marker add/list/toggle/pb` works while in a level.
 - [ ] `twitimer flags raise/clear` shows the expected HUD banner / soft-flag line.
 - [ ] `twitimer lc status` reports correctly with LevelCollections installed or absent.

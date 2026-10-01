@@ -19,9 +19,9 @@ TwilightTimer 所需的几乎所有信号都是游戏类的**公共字段或属�
 
 由于计时 / 分段 / 重置 / 检查点 / 有效性的规则都定义在这些字段的*转换*上,单个轮询循环(`TimerCore.FixedUpdate`)通过比较当前帧与缓存上一帧即可算出一切 —— 既廉价,又对游戏更新中重命名或内联私有方法具有鲁棒性。
 
-**Harmony 仅用于没有字段能直接暴露事件的地方**:两个旁白 hook(`NarrativeBlock.Play` 与 `SubtitleManager.PlayNarrative`,见 [VOICELINE.md](VOICELINE.md))、暂停菜单重启 hook(`PauseMenu.RestartClick`,触发 `restart_clears_forgivable` 选项)、禁跳跳跃键抑制 hook(`HumanControls.HandleInput`,R3.5.3),以及**精确计时边界 hook**(`Game.AfterLoad`、`Game.EnterPassZone`、`Game.Fall` —— R1.11/TB-3)。最后一个是有意为之的例外:虽然存在可轮询的字段(`HumanControls.jump`),但强制执行是对游戏**同一物理帧内写入并消费**的链路(`NetPlayer.PreFixedUpdate` → `Human.FixedUpdate`)的*写入*;从插件自身的 `FixedUpdate` 写该字段会陷入未定义的脚本执行顺序竞态。轮询覆盖的是*观察*——抑制一个游戏同帧消费的输入,必须挂钩进链路内部。
+**Harmony 仅用于没有字段能直接暴露事件的地方**:两个旁白 hook(`NarrativeBlock.Play` 与 `SubtitleManager.PlayNarrative`,见 [VOICELINE.md](VOICELINE.md))、暂停菜单重启 hook(`PauseMenu.RestartClick`,触发 `restart_clears_forgivable` 选项)、禁跳跳跃键抑制 hook(`HumanControls.HandleInput`,R3.5.3),以及计时边界 hook(`Game.AfterLoad` 记录起点 tick;`Game.Fall` 记录终点 tick;`Game.EnterPassZone` / `Game.Fall` 锁存完成标志 —— R1.11/TB-3)。最后一个是有意为之的例外:虽然存在可轮询的字段(`HumanControls.jump`),但强制执行是对游戏**同一物理帧内写入并消费**的链路(`NetPlayer.PreFixedUpdate` → `Human.FixedUpdate`)的*写入*;从插件自身的 `FixedUpdate` 写该字段会陷入未定义的脚本执行顺序竞态。轮询覆盖的是*观察*——抑制一个游戏同帧消费的输入,必须挂钩进链路内部。
 
-计时边界 hook 则是另一类同源例外:状态翻转与通关判定发生在游戏自身物理帧**内部**,轮询最早只能在其后的某一帧观察到,而具体是哪一帧取决于 Unity 脚本执行顺序(BepInEx 运行期挂载的组件无法设置执行顺序)。因此 hook 精确记录 tick,而所有转换 / 分段 / 重置判定仍由轮询循环负责 —— 见[纯 tick 时钟与精确边界](#纯-tick-时钟与精确边界r111)。
+计时边界 hook 则是另一类同源例外:分段的**起点**由 `Game.AfterLoad`(协程 / `Update` 阶段)把 `Game.state` 置为 `PlayingLevel`,其后缀精确记录 `SegmentStartTicks`;**终点**由 `Game.Fall` 在检测到通关的瞬间锁存 `PendingEndTicks`(含通过帧本身,R1.4.2),不依赖轮询的观测时机或脚本执行顺序。所有转换 / 分段 / 重置判定仍由轮询循环负责 —— 见[纯 tick 时钟与精确边界](#纯-tick-时钟与精确边界r111)。
 
 ## 模块布局
 
@@ -38,7 +38,7 @@ Core/
   LevelIdentity.cs        共享的关卡 id / 英文名助手(R8.2.3, R10.1.2)
 Validation/
   InvalidReason.cs        枚举 + 严重度映射
-  ValidityFlags.cs        不可原谅 / 可原谅标记集合
+  ValidityFlags.cs        不可原谅 / 可原谅 / 软标记集合
   GenericValidators.cs    作弊码检测
 Tags/
   ITagRule.cs             标签规则接口 + ValidationContext
@@ -51,7 +51,7 @@ Patches/
   NarrativeBlockPatches.cs    NarrativeBlock.Play 后缀
   SubtitleManagerPatches.cs   SubtitleManager.PlayNarrative 后缀
   PauseMenuPatches.cs         PauseMenu.RestartClick / LoadClick 后缀
-  TimingBoundaryPatches.cs    精确分段起止 tick(Game.AfterLoad / EnterPassZone / Fall,R1.11)
+  TimingBoundaryPatches.cs    精确分段起止 tick + 完成标志锁存(Game.AfterLoad / EnterPassZone / Fall,R1.11)
   HumanControlsPatches.cs     HumanControls.HandleInput 后缀(禁跳强制)
 Hud/
   TimerHud.cs             IMGUI 面板(R2)
@@ -111,23 +111,30 @@ Match/                    黄昏杯比赛支持（见 TWILIGHT_CUP.md）
 
 引擎的游戏时钟是**整数物理帧 tick 计数器**,而非 `double` 秒累加器:
 
-- `RunState.PlayableTicks`(`ulong`)统计可游玩 `FixedUpdate` 帧数。所有分段快照(`SegmentStartTicks`、`LastSegmentTicks`、`TotalAtLastSegmentTicks`、`LastRunTicks`、`WakeUpTicks`)都是整数 tick。分段时间即纯整数差 `PlayableTicks - SegmentStartTicks`。
+- `RunState.PlayableTicks`(`ulong`)统计可游玩 `FixedUpdate` 帧数。所有分段快照(`SegmentStartTicks`、`LastSegmentTicks`、`TotalAtLastSegmentTicks`、`LastRunTicks`、`WakeUpTicks`)都是整数 tick。唯一例外是"上关RT"快照(`RunState.RealTimeAtLastSegment`):它定格的是墙钟 `RunState.RealTime`(本身就是秒),而非 tick。分段时间即纯整数差 `PlayableTicks - SegmentStartTicks`。
 - `RunState.PauseAccum`(`double`)是唯一非 tick 分量:暂停会停止 `FixedUpdate`,因此它按墙钟 `unscaledDeltaTime` 累计(R1.8.3)。
 - `Core/GameClock.cs` 是**唯一**读取 `Time.fixedDeltaTime` 的地方。它以一次乘法完成 tick→秒换算(`Seconds(ticks, pauseAccum)`),因此同一 tick 数永远得到同一秒值(无逐帧浮点累积漂移)。所有显示与持久化(HUD 行、`t_ms`、PB 比较)都经它换算;引擎每 tick 还会回填 `RunState.GameTimeSeconds` 缓存供只读消费方使用。
 
-**为什么需要边界 hook。** 游戏在 `Game.AfterLoad` 内把 `Game.state` 置为 `PlayingLevel`,在 `Game.Fall` 内检测通关 —— 二者都发生在游戏自身物理帧执行期间。轮询最早只能在其后的某一帧观察到,而具体哪一帧取决于 Unity 脚本执行顺序,这正是旧代码在载入与终点处出现随机 ±1 tick 的原因。因此 `Patches/TimingBoundaryPatches.cs` 在权威方法处精确记录 tick:
+**为什么需要边界 hook。** 分段的两个边界都是轮询只能晚一帧观察到的翻转,因此 `Patches/TimingBoundaryPatches.cs` 在权威赋值处精确记录 tick:
+
+- **起点** —— `Game.AfterLoad` 置 `state = PlayingLevel`;其后缀锁存 `SegmentStartTicks`。
+- **终点** —— `Game.Fall` 在检测到通关的瞬间锁存 `PendingEndTicks`,含通过帧本身(R1.4.2)。通关判定在游戏物理帧内完成,轮询只能晚一帧或更多帧才观察到,因此所记录的 tick 与游戏真正离开 `PlayingLevel` 的时刻相差卸载延迟(可能一两个 tick)。
+
+`Game.EnterPassZone` / `Game.Fall` hook 还会锁存 `LevelPassed` 完成标志(因为 `Game.Fall` 可能在被轮询读到之前就为 Workshop/EditorPick 清掉 `passedLevel`)。hook 只记录 tick 与置标志 —— 所有转换 / 分段 / 重置 / 有效性判定仍走单一轮询循环。
+
+**`pass` 边界行。** `RecordLevelPass` 在 `Game.Fall` 的 tick 处输出一行 `pass` 边界;该 tick 就是分段终点,因此 `twitimer clock history` 会以 `src=hook` 报告轮询消费的该边界。`zone` 行标记 `Game.EnterPassZone`,它通常在 `Game.Fall` 之前就锁存 `LevelPassed`。
 
 | 边界 | Hook | 记录值 |
 |---|---|---|
 | 分段起点(R1.2.2) | `Game.AfterLoad` 后缀 | `SegmentStartTicks`(由 `StartSegment` 消费) |
-| 通关标志(R1.4.2) | `Game.EnterPassZone` 后缀 | `LevelPassed` 锁存 |
-| 分段终点(R1.4.2) | `Game.Fall` 前缀/后缀 | `PendingEndTicks` —— 精确通关 tick |
-
-`Game.Fall` 前缀先快照本次调用是否走了通关分支(该方法自身会在返回前为 Workshop/EditorPick 清掉 `passedLevel`);后缀锁存 `PendingEndTicks`,轮询随即在此冻结累计。hook 只记录 tick 与置标志 —— 所有转换 / 分段 / 重置 / 有效性判定仍走单一轮询循环,与引擎其余部分保持一致。
+| 分段终点(R1.4.1) | `Game.Fall` 后缀 | `PendingEndTicks` —— 通过帧的精确 tick,含通过帧本身 |
+| 通关标志 + `pass` tick(R1.4.2) | `Game.EnterPassZone` 后缀 / `Game.Fall` 前缀+后缀 | `LevelPassed` 锁存,以及 `Game.Fall` tick 处的诊断性 `pass` 边界行 |
 
 ### 现实时间计时器(R1.10)
 
-与 tick 游戏时钟分开,`RunState.RealTime` 是墙钟计时器:它在整个运行的第一个可玩分段开始时启动,只要 `RunState.RealTimeActive` 为真,就在 `TimerCore.Update` 中用 `Time.unscaledDeltaTime` 累计。由于它不受 `PlayingLevel` 门槛限制,因此能穿过 `LoadingLevel` 加载屏与暂停继续前进。它在 `TimerCore.EndSegment` 记录整局完成(R1.6)的同一时刻停表并定格;当本局退出到菜单/大厅(重试除外)时也会停止,避免在空闲界面里暗中累计。整局重置与一键重试会把它与活动游戏计时器一并清零。HUD 通过 `show_real_time` 默认在游戏总时间下方显示该行,但无论是否显示,时钟都保持后台活跃。
+与 tick 游戏时钟分开,`RunState.RealTime` 是墙钟计时器:它在整个运行的第一个可玩分段开始时启动,只要 `RunState.RealTimeActive` 为真,就在 `TimerCore.Update` 中用 `Time.unscaledDeltaTime` 累计。由于它不受 `PlayingLevel` 门槛限制,因此能穿过 `LoadingLevel` 加载屏与暂停继续前进。它在 `TimerCore.EndSegment` 记录整局完成(R1.6)的同一时刻停表并定格;当本局退出到菜单/大厅(重试除外)时也会停止,避免在空闲界面里暗中累计。整局重置与一键重试会把它与活动游戏计时器一并清零。HUD 行显示在用户放置它的列中(默认在 `[column.2]` 的“游戏总时间”下方),但无论是否显示,时钟都保持后台活跃。
+
+**上关RT(`RunState.RealTimeAtLastSegment`)** 是 `TotalAtLastSegment` 的现实时间对应物:`RunState.EndSegment` 仅在分段 `completed` 时,把当前的 `RealTime` 值定格进 `RealTimeAtLastSegment`,于是 HUD 行显示上一关结束时整局累计的现实时间(R1.10.7)。它与 `TotalAtLastSegmentTicks` 走相同的清零路径(自动重置、从菜单开始新局、手动重置),重试保留。默认显示在第二列 `RealTime` 正下方的行。
 
 ## 为什么重试先卸载再重新启动关卡
 
@@ -191,11 +198,11 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 
 关卡离开 `PlayingLevel` 不一定是完成 —— 可能是中途退出(`Esc → Exit → PauseLeave`),而且**Workshop/EditorPick 关卡的完成与中途退出走的是同一条 `PauseLeave` 路径**。因此仅凭状态转换无法区分二者。`RunState.LevelPassed` 就是这个信号:引擎每物理帧把 `Game.passedLevel` 锁存进 `LevelPassed`(取或,一旦进入通关区就保持为真 —— 游戏在完成/离开流程中、状态翻转*之前*就清掉了 `passedLevel`,所以必须在之前读到它)。`LevelPassed` 在分段开始时复位。
 
-`EndSegment(completed: LevelPassed)` 只在 `completed` 为真时才记录 `LastSegmentTicks`/`TotalAtLastSegmentTicks`、tag 的 `OnLevelExit` 完成校验(R4.2、语音线)以及 LC 最后一关的 `LastRun` 捕获。中途退出(或重试,此时 `LevelPassed` 为假)不会改动上一段尝试的 `LastSegmentTicks`/`TotalAtLastSegmentTicks` —— 这正是想要的行为:"上一段"参照值反映的是上一关**打完**的成绩,而不是半途走出去的那一关。注意 `PlayingLevel → LoadingLevel`(内置关卡的 `StartNextLevel` 重载)本质上就是完成,且该处 `LevelPassed` 由更早的 `EnterPassZone` 置真。
+`EndSegment(completed: LevelPassed)` 只在 `completed` 为真时才记录 `LastSegmentTicks`/`TotalAtLastSegmentTicks`(以及"上关RT"快照 `RealTimeAtLastSegment`)、tag 的 `OnLevelExit` 完成校验(R4.2、语音线)以及 LC 最后一关的 `LastRun` 捕获。中途退出(或重试,此时 `LevelPassed` 为假)不会改动上一段尝试的 `LastSegmentTicks`/`TotalAtLastSegmentTicks`/`RealTimeAtLastSegment` —— 这正是想要的行为:"上一段"参照值反映的是上一关**打完**的成绩,而不是半途走出去的那一关。注意 `PlayingLevel → LoadingLevel`(内置关卡的 `StartNextLevel` 重载)本质上就是完成,且该处 `LevelPassed` 由更早的 `EnterPassZone` 置真。
 
 ## 为什么自动重置与菜单进入会清零"上一段"快照
 
-`LastSegmentTicks` 与 `TotalAtLastSegmentTicks` 是最近完成分段的参照值,`LastRunTicks` 是上一次完整整局的总时间。**自动重置(R1.7)会清零实时计时器与两个"上一段"快照**,使退出到菜单后呈现新的分段基线,同时保留 `LastRunTicks` 作为上一次完整成绩的参照(R1.7.4)。手动重置键则清零全部三个快照(R1.7.1)。
+`LastSegmentTicks`、`TotalAtLastSegmentTicks` 与 `RealTimeAtLastSegment` 是最近完成分段的参照值,`LastRunTicks` 是上一次完整整局的总时间。**自动重置(R1.7)会清零实时计时器与两个"上一段"快照**(以及共享同一生命周期的"上关RT"快照),使退出到菜单后呈现新的分段基线,同时保留 `LastRunTicks` 作为上一次完整成绩的参照(R1.7.4)。手动重置键则清零它们全部(R1.7.1)。
 
 `RunState.Reset(bool keepLastValues, bool keepLastRun)` 区分这两个关注点。自动重置与菜单进入路径使用 `DoFullReset(keepLastValues: false, keepLastRun: true)`;手动重置键使用 `DoFullReset(keepLastValues: false, keepLastRun: false)`。
 
@@ -211,15 +218,15 @@ R6.2 要求一次**完整的异步关卡重载**,含空过渡场景(R6.2.1.3)。
 
 (单独的 Workshop 关卡通关不算"整局完成" —— 在计时器的语义里它不结束一局。)过去那个"任何分段开始时时钟还在跑就记录 LastRun"的启发式已移除:它会在战役中途的每个关卡边界误触发,而 EditorPick/Workshop 的收尾又永远捕不到;现在 `LastRun` 只在上述真正的完成时更新。
 
-`LastRun` 渲染在**紧挨计时列右侧新建的独立列**中(以主块最宽行为界),不与主计时同列,且仅空闲时(`!InSegment && PlayableTicks == 0`)显示 —— 新局开始计时即隐藏,直到下次整局完成。同一个右侧列在启用 `show_wake_up_time` 时还会把当前关卡的**起身时间**显示为第二行,因此即便 `LastRun` 隐藏,关内也能看到该值;默认在玩家重生、暂停菜单加载存档点或暂停菜单重新开始关卡时重新开始测量,`only_record_first_wake_up_time` 可恢复“本关开始后只记第一次起身”的原机制;关卡结束或退出时该值会被清除。唯一的例外是战役尾声:最后一个可玩关卡被通关后,游戏会把 Credits(BuiltIn 索引 == `levelCount`)当作普通关卡加载,该分段被标记为 `InEpilogueSegment` —— 它属于刚结束的那局,所以 Credits 期间列持续显示(且 Credits 自身不会记录任何东西:它没有通关区,其分段永远不会算作 `completed`)。**地图包运行中被列为关卡的 Credits 不算尾声**(运行仍在进行 —— collection 中途出现 Credits 只是一关普通关卡),因此 `InEpilogueSegment` 还要求"当前不在地图包运行中"。
+`LastRun` 是与其它行相同的普通 HUD 行(默认放进 `[column.3]`),且仅空闲时(`!InSegment && PlayableTicks == 0`)显示 —— 新局开始计时即隐藏,直到下次整局完成。**起身时间**也是普通行(默认在 `LastRun` 下方),因此即便 `LastRun` 隐藏,关内也能看到该值;默认在玩家重生、暂停菜单加载存档点或暂停菜单重新开始关卡时重新开始测量,`only_record_first_wake_up_time` 可恢复“本关开始后只记第一次起身”的原机制;关卡结束或退出时该值会被清除。唯一的例外是战役尾声:最后一个可玩关卡被通关后,游戏会把 Credits(BuiltIn 索引 == `levelCount`)当作普通关卡加载,该分段被标记为 `InEpilogueSegment` —— 它属于刚结束的那局,所以 Credits 期间该行持续显示(且 Credits 自身不会记录任何东西:它没有通关区,其分段永远不会算作 `completed`)。**地图包运行中被列为关卡的 Credits 不算尾声**(运行仍在进行 —— collection 中途出现 Credits 只是一关普通关卡),因此 `InEpilogueSegment` 还要求"当前不在地图包运行中"。
 
 ## 配置检查与修复
 
-`ConfigRepair.Run(cfg)` 在 `Plugin.Awake` 中、`ConfigService.Load` 之后、任何子系统读取配置之前运行一次,检测并补全缺失或错误的配置项。标量类设置 / 布局键本就会自愈到默认值(解析辅助函数在失败时回退到当前值),因此规则针对的是那些"清空后仅从磁盘重建"的集合字段——新加入的默认项对老用户会静默丢失(这正是 `TotalAtLastSegment` 行在引入此系统前不显示的原因)。
+`ConfigRepair.Run(cfg)` 在 `Plugin.Awake` 中、`ConfigService.Load` 之后、任何子系统读取配置之前运行一次,检测并补全缺失或错误的配置项。标量类设置 / 布局键本就会自愈到默认值(解析辅助函数在失败时回退到当前值);目前唯一的规则是共享排行榜迁移(`MigrateLeaderboardFromSettings`),把旧 settings.ini 里的排行榜键一次性复制到 layout.ini 的 `[leaderboard]`。
 
 设计:**每次启动做幂等的结构性检查,仅在确有改动时写盘**(由一个 dirty 标志门控的 `ConfigService.SaveSettings`)。不引入配置版本号——一旦用户手工编辑文件,存储的版本号就会失真;而廉价的结构性检查能自愈手工编辑造成的损坏,且对干净文件零改动。修复时输出一行汇总日志,干净启动时静默。
 
-第一条规则 `RepairLayoutRows`:当用户的行集合看起来是"默认派生"时(`IsDefaultDerived`:行集合等于按默认顺序排列、扣除缺失项后的默认集),插入任何缺失的默认 HUD 行。被重排、含额外或重复行的集合视为手工自定义,原样保留并仅给出提示。规范的默认顺序只有一个出处——`LayoutModel.DefaultRows`,被 `Rows` 字段初始化器与修复目标共用,二者不会漂移;新增默认行只需在此改一行。新增一个修复关注点只需写一个方法并在 `ConfigRepair.Rules` 数组加一项。
+**HUD 布局列刻意不在这里修复。** 默认布局只在配置初始化时写入一次 —— `ConfigService.Load` 在 `layout.ini` 不存在时写入它,种下规范的 `LayoutModel.DefaultColumns`(第 1–3 列)。既有文件绝不自动修改:用户通过设置面板的 **界面 → 计时器HUD** 列编辑器(或 `twitimer layout row/column`)管理列;旧 `[rows]` 配置仍可加载(在内存中映射到 `[column.1]`),但只会在下次正常保存时改写为 `[column.N]` 格式。
 
 ## 构建
 
@@ -248,6 +255,6 @@ BepInDependency）并作为其计时引擎。比赛能力位于 `Match/` 与
 - **触发是轮询的。** `MarkersManager.OnPhysicsTick` 在 `TimerCore.FixedUpdate` 内运行(紧接 subsegment tick 之后),只读取公开字段:`Human.Localplayer.transform.position`、`Human.jump`、`Human.state`、`Human.Localplayer.GetComponent<GrabManager>().grabbedObjects`、`Game.currentCheckpointNumber`,以及 `RunState.PlayableTicks` / `SegmentStartTicks`(经 `GameClock` 换算为分段毫秒)。
 - **唯一不可轮询的事件**是暂停菜单的存档点加载(`PauseMenu.LoadClick` → `Game.RestartCheckpoint`),它在 `FixedUpdate` 停止期间发生。该事件通过*既有*的 `PauseMenuLoadPatch` 后缀投递(不新增 Harmony 类);暂停菜单的关卡重开(`PauseMenu.RestartClick`)同样通知管理器清空本关的标记记录与 feed(R10.1.6)。
 - **PB 时机与 R8 一致**:在 `TimerCore.EndSegment` 中、`State.EndSegment` *之前*写入(这样整局重置不会毁掉分段起点),门控条件为"通过 + 非重试 + 成绩有效"。tag 的 `OnLevelExit` 完成校验(最终检查点 / 旁白)会在 subsegment 与标记的 PB 写入**之前**执行,因此只有在关卡结束时才被发现无效的成绩也不会被记为 PB。
-- **排行榜是共享的。** `LeaderboardHud`(由 `SubsegmentHud` 改名)根据 `LayoutModel.LeaderboardMode` 渲染 subsegment 参考或标记 feed;模式循环键从 `SubsegmentManager` 移到了 HUD,因此两种模式共用同一个键与外观设置。该键按“关闭 → `Subsegment` → `Markers` → 关闭”循环。其顶部固定在屏幕垂直中心(加上 `layout.ini [leaderboard]` 的 `offset_y`),内容向下延伸而不再随行数变化重新居中。标记 feed 最新在上,格式为 `{名称}: {时间}`(绝对分段时间或与标记 PB 的带符号差值),两种时间模式下都应用领先 / 落后 / 持平颜色(R10.7)。
+- **排行榜是共享的。** `LeaderboardHud`(由 `SubsegmentHud` 改名)根据 `LayoutModel.LeaderboardMode` 渲染 subsegment 参考或标记 feed;模式循环键从 `SubsegmentManager` 移到了 HUD,因此两种模式共用同一个键与外观设置。该键按“关闭 → 可用内容模式 → 关闭”循环;模块被禁用(用户设置或自动禁用机制,如客机门控,见 `AutoDisableRegistry`)时对应模式自动跳过,例如 subsegment 关闭后仅在关闭 ↔ 标记之间轮换。其顶部固定在屏幕垂直中心(加上 `layout.ini [leaderboard]` 的 `offset_y`),内容向下延伸而不再随行数变化重新居中。标记 feed 最新在上,格式为 `{名称}: {时间}`(绝对分段时间或与标记 PB 的带符号差值),两种时间模式下都应用领先 / 落后 / 持平颜色(R10.7)。
 - **物体身份在游戏里没有 GUID。** 捕获的抓取物体引用会在存在时记录序列化的 `NetIdentity.sceneId`(在关卡构建内对场景物体唯一),否则记录从场景根算起的层级路径,外加名称与世界坐标。解析顺序:sceneId 扫描 → 路径逐级匹配 → 名称 + 位置(5 m 容差,最后手段,记日志)。无法解析的目标在本次尝试中跳过,每关记一次警告(R10.6.4)。
 - **可视化无副作用。** `MarkerOverlay` 用 `Graphics.DrawMesh` + 透明 unlit 材质渲染范围立方体与抓取物体高亮(不创建碰撞体、不改游戏物体 / 材质,因此不影响联机);找不到 shader 时降级为一次 IMGUI 线框投影。标签是把标记中心经当前活动相机投影后绘制的 IMGUI 标签:本地玩家相机启用时优先使用它,否则使用 `Camera.main`(或任意启用中的相机),这样自由视角下名称会显示在自由相机投影后的真实位置,而不是角色相对相机的位置。

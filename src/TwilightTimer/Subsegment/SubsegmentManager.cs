@@ -73,12 +73,77 @@ namespace TwilightTimer
     /// This is a plain polled MonoBehaviour owned by <see cref="TimerCore"/>;
     /// TimerCore calls the lifecycle/tick hooks at the same points it processes
     /// timing, so subsegment sampling shares the authoritative game-time clock.
+    ///
+    /// Co-op behavior (R8.10): during a multiplayer session the module only runs
+    /// on the host. A co-op <b>client</b> (<c>NetGame.isClient</c>) has the
+    /// module gated off entirely — no sampling, no detection, no leaderboard,
+    /// no PB writes — because the run's reference data belongs to the host's
+    /// run. The <b>host</b> (<c>NetGame.isServer</c>) runs it normally, and
+    /// detection always uses the local player's own character
+    /// (<c>Human.Localplayer</c>, which on the host machine is the host's
+    /// character), never other players'.
+    ///
+    /// The co-op client gate is expressed through the shared auto-disable
+    /// interface (<see cref="AutoDisableRegistry"/>), keeping the user's
+    /// <c>Subsegment.Enable</c> setting separate from automatic off states: the
+    /// module is <b>active</b> only when the user enabled it AND no
+    /// auto-disable source is on, and the leaderboard mode-cycle drops the
+    /// subsegment mode whenever it is not active (R8.5.1.2).
     /// </summary>
     public sealed class SubsegmentManager : MonoBehaviour
     {
         public static SubsegmentManager Instance { get; private set; }
 
         private SubsegmentOptions _options;
+
+        /// <summary>
+        /// Auto-disable sources for this module (R8.5.1.2): the co-op client
+        /// gate is registered in <see cref="Awake"/>; future mechanisms can
+        /// register more sources with <c>AutoDisable.Register</c>.
+        /// </summary>
+        public AutoDisableRegistry AutoDisable { get; private set; }
+
+        /// <summary>
+        /// Session-only override for the co-op client gate, set by the dev
+        /// console ('twitimer sub clientmode on|off|auto') so the client-disable can
+        /// be tested without a real multiplayer client session (mirrors the
+        /// 'twitimer tag label' / 'twitimer flags raise' test tools). Null = follow
+        /// <c>NetGame.isClient</c> (default).
+        /// </summary>
+        public static bool? CoopClientOverride;
+
+        /// <summary>
+        /// True when the co-op client gate disables the module: a multiplayer
+        /// client's subsegment is off entirely (R8.10.1).
+        /// </summary>
+        public bool IsCoopClientDisabled => CoopClientOverride ?? NetGame.isClient;
+
+        /// <summary>
+        /// Whether the module is currently active: the user's SubsegmentEnable
+        /// setting on, and not gated off by any auto-disable source (the co-op
+        /// client gate R8.10, or an active match T7.5).
+        /// </summary>
+        public bool IsActiveNow => IsActive();
+
+        /// <summary>User setting on AND not auto-disabled (co-op client gate and match suppression are such sources).</summary>
+        private bool IsActive() => _options.Enable && !IsAutoDisabled;
+
+        /// <summary>Whether the user enabled the module in settings (R8.6 <c>Subsegment.Enable</c>).</summary>
+        public bool IsUserEnabled => _options.Enable;
+
+        /// <summary>Whether some auto-disable mechanism (e.g. the co-op client gate or a match) currently turns the module off.</summary>
+        public bool IsAutoDisabled => AutoDisable != null && AutoDisable.IsDisabled;
+
+        /// <summary>Reasons of the auto-disable sources currently active (e.g. <c>coop-client</c>, <c>match</c>). Empty when none.</summary>
+        public List<string> AutoDisabledReasons => AutoDisable != null ? AutoDisable.ActiveReasons() : new List<string>();
+
+        /// <summary>
+        /// Whether the subsegment leaderboard mode may appear in the cycle:
+        /// user-enabled and not auto-disabled (R8.5.1.2). A match forces the
+        /// shared leaderboard to the markers feed (T7.6), so subsegment is not
+        /// offered while one runs.
+        /// </summary>
+        public bool IsLeaderboardAvailable => IsActive();
 
         // Recorder state
         private readonly List<SubsegmentSample> _currentSamples = new List<SubsegmentSample>();
@@ -141,6 +206,17 @@ namespace TwilightTimer
         private void Awake()
         {
             Instance = this;
+            AutoDisable = new AutoDisableRegistry();
+            // R8.10.1: as a co-op client (NetGame.isClient, or the session test
+            // override) the module is disabled entirely. Expressed through the
+            // auto-disable interface so status/console output can report it and
+            // the leaderboard mode-cycle drops the subsegment mode while on.
+            AutoDisable.Register("coop-client", () => IsCoopClientDisabled);
+            // T7.5 (TwilightTimer fork): an active Twilight Cup match forces the
+            // module off for the whole session. Expressed through the same
+            // auto-disable interface so status output and the leaderboard
+            // mode-cycle see it as just another automatic off state.
+            AutoDisable.Register("match", () => MatchMode.Active);
             _options = SubsegmentOptions.FromSettings(SettingsFromConfig());
             EnsureLoadDirectory();
         }
@@ -181,7 +257,7 @@ namespace TwilightTimer
             get
             {
                 var source = _displayReferences ?? _references;
-                if (!Enabled || source.Count == 0) return new List<SubsegmentReference>();
+                if (!IsActive() || source.Count == 0) return new List<SubsegmentReference>();
                 var visible = source.Where(r => _options.IsReferenceEnabled(r.DisplayId)).ToList();
                 var with = visible.Where(r => r.DiffMs.HasValue)
                     .OrderByDescending(r => r.DiffMs.Value)
@@ -202,12 +278,12 @@ namespace TwilightTimer
         public bool MatchSuppressed => MatchMode.Active;
 
         /// <summary>
-        /// The effective enabled state: the user's setting AND not suppressed by
-        /// an active match. Every internal gate uses this, so a match disables
-        /// sampling, reference loading, diffing, PB writes and the leaderboard
-        /// in one place.
+        /// The effective enabled state: the user's setting AND not gated off by
+        /// an auto-disable source AND not suppressed by an active match. Every
+        /// internal gate uses this, so a match disables sampling, reference
+        /// loading, diffing, PB writes and the leaderboard in one place.
         /// </summary>
-        public bool Enabled => _options.Enable && !MatchMode.Active;
+        public bool Enabled => IsActive();
 
         /// <summary>
         /// Whether the current level is allowed to record. False when the level
@@ -249,7 +325,7 @@ namespace TwilightTimer
             // active at level start (or later) keeps this level out of the
             // record entirely (T7.5).
             _samplingAllowedForLevel = Enabled;
-            if (!Enabled)
+            if (!IsActive())
             {
                 ClearRuntime();
                 return;
@@ -343,7 +419,7 @@ namespace TwilightTimer
             UpdateOptions();
             // No PB may be written for a level that was suppressed by a match
             // (T7.5), even if the match ended before the level did.
-            if (!Enabled || !_samplingAllowedForLevel)
+            if (!IsActive() || !_samplingAllowedForLevel)
             {
                 ClearRuntime();
                 return;
@@ -456,7 +532,7 @@ namespace TwilightTimer
         public void OnRunExit()
         {
             UpdateOptions();
-            if (!Enabled || !_samplingAllowedForLevel)
+            if (!IsActive() || !_samplingAllowedForLevel)
             {
                 ClearRuntime();
                 return;
@@ -483,7 +559,12 @@ namespace TwilightTimer
         public void OnPhysicsTick(Game game, GameState gState, RunState state)
         {
             UpdateOptions();
-            if (!Enabled || !_samplingAllowedForLevel || !state.InSegment || gState != GameState.PlayingLevel)
+            if (!IsActive())
+            {
+                ClearRuntimeIfGatedOff();
+                return;
+            }
+            if (!_samplingAllowedForLevel || !state.InSegment || gState != GameState.PlayingLevel)
                 return;
 
             var pos = GetCurrentPosition();
@@ -524,8 +605,11 @@ namespace TwilightTimer
         public void OnUpdate()
         {
             UpdateOptions();
-            if (!Enabled)
+            if (!IsActive())
+            {
+                ClearRuntimeIfGatedOff();
                 return;
+            }
 
             float now = Time.unscaledTime;
             bool firstSettled = false;
@@ -600,6 +684,22 @@ namespace TwilightTimer
             _activeMultiProject = "Any%";
             _pendingMultiProject = null;
             _pendingLeaderboardTitle = null;
+        }
+
+        /// <summary>
+        /// Cheap per-frame call used while the module is gated off (co-op
+        /// client, R8.10.1): clears runtime only when there is something to
+        /// clear, so a mid-session join into client mode cannot leave stale
+        /// references / leaderboard content behind, without allocating on
+        /// every tick while already idle.
+        /// </summary>
+        private void ClearRuntimeIfGatedOff()
+        {
+            if (_references.Count > 0 || _displayReferences != null
+                || _currentSamples.Count > 0 || _multiRunCandidate || _multiRunActive)
+            {
+                ClearRuntime();
+            }
         }
 
         private void ClearMultiRun()
@@ -760,7 +860,6 @@ namespace TwilightTimer
                 dx = 0f,
                 dy = 0f,
                 dz = 0f,
-                plane_radius = _options.PlaneRadius,
             });
         }
 
@@ -790,7 +889,6 @@ namespace TwilightTimer
                 dx = dx,
                 dy = dy,
                 dz = dz,
-                plane_radius = _options.PlaneRadius,
             });
             _lastSamplePosition = pos;
             _lastSampleGameTime = gameTime;
@@ -824,7 +922,6 @@ namespace TwilightTimer
                 dx = dx,
                 dy = dy,
                 dz = dz,
-                plane_radius = _options.PlaneRadius,
             });
             _lastSamplePosition = pos;
             _lastSampleGameTime = endTime;
@@ -1003,7 +1100,9 @@ namespace TwilightTimer
                 Vector3 d = sample.Displacement;
                 if (d.magnitude < _options.MinMove) continue;
                 Vector3 normal = d.normalized;
-                float radius = sample.plane_radius > 0f ? sample.plane_radius : _options.PlaneRadius;
+                // The plane radius comes from the live config at load time (R8.4.1.3);
+                // legacy samples that still carry a plane_radius field are ignored.
+                float radius = _options.PlaneRadius;
                 reference.Planes.Add(new SubsegmentPlane
                 {
                     Seq = sample.seq,
@@ -1118,7 +1217,7 @@ namespace TwilightTimer
 
         private void WriteIlPb(string levelId, RunState state, long endTimeMs)
         {
-            // A simulated test pass ('hsr pass') must not persist a PB.
+            // A simulated test pass ('twitimer pass') must not persist a PB.
             if (state != null && state.SuppressPbRecording)
                 return;
             if (_currentSamples.Count == 0)
@@ -1152,7 +1251,6 @@ namespace TwilightTimer
                     dx = s.dx,
                     dy = s.dy,
                     dz = s.dz,
-                    plane_radius = s.plane_radius,
                 });
             }
 
@@ -1168,7 +1266,7 @@ namespace TwilightTimer
 
         private void WriteMultiPb(RunState state)
         {
-            // A simulated test pass ('hsr pass') must not persist a PB.
+            // A simulated test pass ('twitimer pass') must not persist a PB.
             if (state != null && state.SuppressPbRecording)
                 return;
             if (_multiRunSamples.Count == 0)
