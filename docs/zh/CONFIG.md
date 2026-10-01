@@ -44,8 +44,6 @@ retry_level_override_enabled = false
 retry_level_override =
 show_hud = true
 show_leaderboard = true
-show_real_time = true
-show_wake_up_time = true
 only_record_first_wake_up_time = false
 center_loading_saving = false
 language = en
@@ -64,10 +62,8 @@ leaderboard_key = Tab
 | `retry_level_override` | 字符串(关卡英文名或创意工坊数字 id) | (空) | R6.5 —— 一键重试目标。官方关卡按英文名不区分大小写匹配;创意工坊关卡填已加载的 Steam Workshop 数字 id。无效值会在按下重试键时用计时器面板的红色无效样式提示,且不执行重试。开启且当前没有活动关卡时(例如主菜单),按重试键会**直接进入**该指定关卡。 |
 | `show_hud` | true/false | true | R2.5.1 |
 | `show_leaderboard` | true/false | true | 对局排行榜 HUD(仍受 `show_hud` 总开关约束;见 [HUD.md](HUD.md)) |
-| `show_real_time` | true/false | true | R2.5.3 —— 在面板中显示始终活跃的现实时间计时器(默认显示在游戏总时间下方;可关闭) |
-| `show_wake_up_time` | true/false | true | 在右侧列显示“起身时间”;与“上一局游戏时间”同时可见时显示在其下一行。默认从最近一次可起身起点(本关开始、玩家重生、暂停菜单加载存档点、暂停菜单重新开始关卡)开始测量,到下一次起身为止 |
-| `only_record_first_wake_up_time` | true/false | false | R2.5.5 —— 恢复原来的起身时间机制:只记录本关开始后的第一次起身,后续重生、加载存档点或重新开始关卡不重置。设置面板中仅在 `show_wake_up_time` 开启时可见 |
-| `center_loading_saving` | true/false | false | 将游戏自带的右上角"加载/保存"进度提示移动到画面顶部居中 |
+| `only_record_first_wake_up_time` | true/false | false | R2.5.5 —— 恢复原来的起身时间机制:只记录本关开始后的第一次起身,后续重生、加载存档点或重新开始关卡不重置。设置面板(**界面 → 计时器HUD**)中始终显示 |
+| `center_loading_saving` | true/false | false | 将游戏自带的右上角"加载/保存"进度提示移动到画面顶部居中(位于界面页顶部) |
 | `language` | BCP-47 代码 | en | 对应一个 `lang/<code>.txt` |
 | `reset_key` | KeyCode | Backspace | 重置成绩键 |
 | `retry_key` | KeyCode | R | 重试关卡键 |
@@ -106,10 +102,18 @@ font_size = 18
 color_a = FF5272FF
 color_b = FF9A72FF
 
-[rows]
-0 = GameTime
-1 = CurrentSegment
-2 = LastSegment
+[column.1]
+1 = GameTime
+2 = CurrentSegment
+3 = LastSegment
+
+[column.2]
+1 = RealTime
+2 = PrevRt
+
+[column.3]
+1 = LastRun
+2 = WakeUpTime
 
 [leaderboard]
 font_size = 16
@@ -125,6 +129,7 @@ markers_time_mode = Relative
 x = 400
 y = 50
 text = {date} {time}
+font_size = 16
 color_a = FFFFFFFF
 color_b = CCCCCCCF
 
@@ -142,8 +147,9 @@ seat_b_color = FF5A5AFF
 ```
 
 - `[text]` —— 主文本块直接绘制在屏幕上(无窗口、不可拖动)。`offset_x`/`offset_y` 为距屏幕左上角的像素偏移;`font_size` 为字号;`color_a`/`color_b` 为默认双色渐变(十六进制,见 [HUD.md](HUD.md))。
-- `[rows]` —— 有序行;键为从 0 开始的索引。行类型:`GameTime`、`RealTime`、`CurrentSegment`、`LastSegment`、`LastRun`、`CurrentState`。`RealTime` 还受 `show_real_time` 设置控制(默认开启)。起身时间不是行类型 —— 它显示在“上一局游戏时间”旁边的右侧列,由 `show_wake_up_time` 控制。
+- `[column.<n>]` —— 一列的若干行;每个键是该行在列内的 **1 基位置**(自上而下绘制;位置不可重复,永远不会写入 `0`)。列按编号从左到右绘制(`[column.1]` 最左);空列不显示。默认文件(首次安装时写入一次)含 `[column.1]`(`GameTime` / `CurrentSegment` / `TotalAtLastSegment` / `LastSegment`)、`[column.2]`(`RealTime` / `PrevRt`,`PrevRt` 位于 `RealTime` 正下方)与 `[column.3]`(`LastRun` / `WakeUpTime`)。行类型:`GameTime`、`RealTime`、`PrevRt`、`CurrentSegment`、`TotalAtLastSegment`、`LastSegment`、`LastRun`、`WakeUpTime`、`CurrentState`。**所有行类型 —— 包括 `RealTime`、`LastRun` 与 `WakeUpTime` —— 都是普通行**:显示在你放置它们的列中,因此旧的 `show_real_time` / `show_wake_up_time` 设置已移除。旧 `[rows]` 配置仍可加载(在内存中映射到 `[column.1]`),并在下次保存时改写为 `[column.N]` 格式;启动时不再做任何迁移或自动修改。
 - `[leaderboard]` —— 共享排行榜 HUD（分段对比 / 标记模式）。`font_size`、`offset_x`、`offset_y`、`color_faster`、`color_slower`、`color_tie`、`mode`、`markers_time_mode` 控制其外观与显示模式。`offset_y` 相对屏幕垂直中心的固定顶部锚点；内容向下延伸。
+- `[custom.<n>]` —— 位于 `(x, y)` 的任意屏上文本,各自带渐变与字号(`font_size`,默认 `16`)。模板变量:`{date}`、`{time}`、`{version}`、`{collection}`、`{category}`、`{gametime}`、`{realtime}`。
 - `[custom.<n>]` —— 位于 `(x, y)` 的任意屏上文本,各自带渐变。模板变量:`{date}`、`{time}`、`{version}`、`{collection}`、`{category}`、`{gametime}`、`{realtime}`。
 - `[leaderboard]` —— 对局排行榜(锚点在屏幕左缘垂直居中;见 [HUD.md](HUD.md)):`margin_x`(距左缘像素)、`offset_y`(垂直居中微调)、`font_size`(`0` = 跟随 `[text] font_size`)、`seat_a_color`/`seat_b_color`(座席名字颜色,十六进制)。
 

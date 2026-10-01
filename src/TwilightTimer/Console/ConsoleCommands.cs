@@ -168,7 +168,7 @@ namespace TwilightTimer
             {
                 sb.AppendLine($"segment={state.InSegment} timing={state.TimingActive} retrying={state.Retrying} realTimeActive={state.RealTimeActive}");
                 sb.AppendLine($"gameTime={FormatNumber(state.GameTimeSeconds)} segmentTime={FormatNumber(GameClock.SegmentSeconds(state))} realTime={FormatNumber(state.RealTime)}");
-                sb.AppendLine($"lastSegment={FormatNullable(GameClock.LastSegmentSeconds(state))} totalAtLastSegment={FormatNullable(GameClock.TotalAtLastSegmentSeconds(state))} lastRun={FormatNullable(GameClock.LastRunSeconds(state))} wakeUp={FormatNullable(GameClock.WakeUpSeconds(state))}");
+                sb.AppendLine($"lastSegment={FormatNullable(GameClock.LastSegmentSeconds(state))} totalAtLastSegment={FormatNullable(GameClock.TotalAtLastSegmentSeconds(state))} prevRt={FormatNullable(GameClock.RealTimeAtLastSegmentSeconds(state))} lastRun={FormatNullable(GameClock.LastRunSeconds(state))} wakeUp={FormatNullable(GameClock.WakeUpSeconds(state))}");
                 sb.AppendLine($"level={state.CurrentLevelNumber} type={state.CurrentLevelType} cp={(game != null ? game.currentCheckpointNumber : -1)} prevCp={state.PrevCheckpoint} maxCp={state.MaxCheckpointThisLevel} campaignRetryLevel={state.CampaignRetryLevel}");
                 sb.Append("flags:");
                 string hard = state.Flags.FormatReasons(loc);
@@ -307,7 +307,7 @@ namespace TwilightTimer
             sb.AppendLine("Layout keys:");
             foreach (var f in LayoutFields)
             {
-                if (f.FieldType == typeof(List<RowType>) || f.FieldType == typeof(List<CustomText>))
+                if (IsLayoutCollection(f))
                     continue; // managed by 'twitimer layout row/text'
                 sb.Append("  ").AppendLine(FieldName(f.Name));
             }
@@ -330,7 +330,7 @@ namespace TwilightTimer
                 sb.AppendLine("--- layout ---");
                 foreach (var f in LayoutFields)
                 {
-                    if (f.FieldType == typeof(List<RowType>) || f.FieldType == typeof(List<CustomText>))
+                    if (IsLayoutCollection(f))
                         continue;
                     sb.AppendLine($"{FieldName(f.Name)} = {FormatFieldValue(f, cfg.Layout)}");
                 }
@@ -828,6 +828,7 @@ namespace TwilightTimer
             {
                 case "status": CmdLayoutStatus(cfg); break;
                 case "row": CmdLayoutRow(cfg, rest); break;
+                case "column": CmdLayoutColumn(cfg, rest); break;
                 case "text": CmdLayoutText(cfg, rest); break;
                 case "set":
                     if (rest.Count < 2) { Print("Usage: twitimer layout set <key> <value>"); return; }
@@ -838,9 +839,18 @@ namespace TwilightTimer
                     CmdGet(new List<string> { rest[0] });
                     break;
                 default:
-                    Print("Usage: twitimer layout [status|row ...|text ...|get <key>|set <key> <value>]");
+                    Print("Usage: twitimer layout [status|row ...|column ...|text ...|get <key>|set <key> <value>]");
                     break;
             }
+        }
+
+        /// <summary>Append a column's rows as " pos=RowType" pairs, sorted by 1-based position.</summary>
+        private static void AppendColumnRows(StringBuilder sb, Dictionary<int, RowType> rows)
+        {
+            var positions = new List<int>(rows.Keys);
+            positions.Sort();
+            foreach (var pos in positions)
+                sb.Append(' ').Append(pos).Append('=').Append(rows[pos]);
         }
 
         private static void CmdLayoutStatus(ConfigService cfg)
@@ -848,16 +858,21 @@ namespace TwilightTimer
             var l = cfg.Layout;
             var sb = new StringBuilder();
             sb.AppendLine($"offsetX={l.OffsetX} offsetY={l.OffsetY} fontSize={l.FontSize} colorA={GradientText.ToHex(l.ColorA)} colorB={GradientText.ToHex(l.ColorB)}");
-            sb.Append("rows:");
-            for (int i = 0; i < l.Rows.Count; i++)
-                sb.Append(' ').Append(i).Append('=').Append(l.Rows[i]);
+            sb.Append("columns:");
+            var colIndices = new List<int>(l.Columns.Keys);
+            colIndices.Sort();
+            foreach (var col in colIndices)
+            {
+                sb.Append(" [").Append(col).Append(']');
+                AppendColumnRows(sb, l.Columns[col]);
+            }
             sb.AppendLine();
             sb.Append("customTexts:");
             if (l.CustomTexts.Count == 0)
                 sb.Append(" none");
             else
                 for (int i = 0; i < l.CustomTexts.Count; i++)
-                    sb.Append(' ').Append(i).Append("=\"").Append(l.CustomTexts[i].Text).Append("\"@(").Append(l.CustomTexts[i].X).Append(',').Append(l.CustomTexts[i].Y).Append(')');
+                    sb.Append(' ').Append(i).Append("=\"").Append(l.CustomTexts[i].Text).Append("\"@(").Append(l.CustomTexts[i].X).Append(',').Append(l.CustomTexts[i].Y).Append(")size=").Append(l.CustomTexts[i].FontSize);
             sb.AppendLine();
             sb.AppendLine($"leaderboard: fontSize={l.LeaderboardFontSize} offsetX={l.LeaderboardOffsetX} offsetY={l.LeaderboardOffsetY} mode={l.LeaderboardMode} markersTimeMode={l.LeaderboardMarkersTimeMode}");
             Print(sb.ToString());
@@ -866,48 +881,147 @@ namespace TwilightTimer
         private static void CmdLayoutRow(ConfigService cfg, List<string> args)
         {
             var l = cfg.Layout;
-            if (args.Count == 0) { Print("Usage: twitimer layout row <list|add <type>|remove <index>|clear>"); return; }
+            if (args.Count == 0) { Print("Usage: twitimer layout row <list|add <column> <type> [position]|remove <column> <position>|clear <column>>"); return; }
             string sub = args[0].ToLowerInvariant();
             switch (sub)
             {
                 case "list":
                     var sb = new StringBuilder();
-                    for (int i = 0; i < l.Rows.Count; i++)
-                        sb.AppendLine($"{i}: {l.Rows[i]}");
-                    Print(sb.Length == 0 ? "No rows configured." : sb.ToString());
+                    var cols = new List<int>(l.Columns.Keys);
+                    cols.Sort();
+                    foreach (var col in cols)
+                    {
+                        sb.Append("column ").Append(col).Append(':');
+                        AppendColumnRows(sb, l.Columns[col]);
+                        sb.AppendLine();
+                    }
+                    Print(sb.Length == 0 ? "No columns configured." : sb.ToString());
                     return;
                 case "add":
-                    if (args.Count < 2) { Print("Usage: twitimer layout row add <RowType>"); return; }
-                    if (Enum.TryParse(args[1], true, out RowType rt))
+                {
+                    int col;
+                    if (args.Count < 3 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1)
                     {
-                        l.Rows.Add(rt);
-                        cfg.SaveSettings();
-                        Print($"Added row {rt} at index {l.Rows.Count - 1}.");
-                    }
-                    else
-                    {
-                        Print($"Unknown RowType: {args[1]}. Valid: {string.Join(", ", Enum.GetNames(typeof(RowType)))}");
-                    }
-                    return;
-                case "remove":
-                    if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
-                        || idx < 0 || idx >= l.Rows.Count)
-                    {
-                        Print("Usage: twitimer layout row remove <index>");
+                        Print("Usage: twitimer layout row add <column> <RowType> [position]");
                         return;
                     }
-                    var removed = l.Rows[idx];
-                    l.Rows.RemoveAt(idx);
+                    if (!Enum.TryParse(args[2], true, out RowType rt))
+                    {
+                        Print($"Unknown RowType: {args[2]}. Valid: {string.Join(", ", Enum.GetNames(typeof(RowType)))}");
+                        return;
+                    }
+                    int pos = 0;
+                    if (args.Count >= 4 && !int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out pos))
+                    {
+                        Print("Usage: twitimer layout row add <column> <RowType> [position]");
+                        return;
+                    }
+                    Dictionary<int, RowType> rows;
+                    if (!l.Columns.TryGetValue(col, out rows))
+                    {
+                        rows = new Dictionary<int, RowType>();
+                        l.Columns[col] = rows;
+                    }
+                    if (pos <= 0)
+                    {
+                        // No explicit position: append after the current last one.
+                        int max = 0;
+                        foreach (var k in rows.Keys)
+                            if (k > max) max = k;
+                        pos = max + 1;
+                    }
+                    int existing = LayoutModel.PositionOf(rows, rt);
+                    if (existing > 0) rows.Remove(existing);
+                    rows.Remove(pos);   // displace any other row already at this position
+                    rows[pos] = rt;
                     cfg.SaveSettings();
-                    Print($"Removed row {idx} ({removed}).");
+                    Print($"Set row {rt} at column {col} position {pos}.");
                     return;
+                }
+                case "remove":
+                {
+                    int col;
+                    int pos;
+                    Dictionary<int, RowType> rows;
+                    if (args.Count < 3 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1
+                        || !int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out pos)
+                        || !l.Columns.TryGetValue(col, out rows)
+                        || pos < 1 || !rows.ContainsKey(pos))
+                    {
+                        Print("Usage: twitimer layout row remove <column> <position>");
+                        return;
+                    }
+                    var removed = rows[pos];
+                    rows.Remove(pos);
+                    cfg.SaveSettings();
+                    Print($"Removed row at column {col} position {pos} ({removed}).");
+                    return;
+                }
                 case "clear":
-                    l.Rows.Clear();
+                {
+                    int col;
+                    Dictionary<int, RowType> rows;
+                    if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1
+                        || !l.Columns.TryGetValue(col, out rows))
+                    {
+                        Print("Usage: twitimer layout row clear <column>");
+                        return;
+                    }
+                    rows.Clear();
                     cfg.SaveSettings();
-                    Print("Cleared all layout rows.");
+                    Print($"Cleared column {col} (empty columns are not displayed).");
                     return;
+                }
                 default:
-                    Print("Usage: twitimer layout row <list|add <type>|remove <index>|clear>");
+                    Print("Usage: twitimer layout row <list|add <column> <type> [position]|remove <column> <position>|clear <column>>");
+                    return;
+            }
+        }
+
+        private static void CmdLayoutColumn(ConfigService cfg, List<string> args)
+        {
+            var l = cfg.Layout;
+            if (args.Count == 0) { Print("Usage: twitimer layout column <list|new|remove <column>>"); return; }
+            string sub = args[0].ToLowerInvariant();
+            switch (sub)
+            {
+                case "list":
+                {
+                    var cols = new List<int>(l.Columns.Keys);
+                    cols.Sort();
+                    if (cols.Count == 0)
+                        Print("No columns configured.");
+                    else
+                        Print("columns: " + string.Join(", ", cols.ConvertAll(c => c.ToString(CultureInfo.InvariantCulture)).ToArray()));
+                    return;
+                }
+                case "new":
+                {
+                    int max = 0;
+                    foreach (var k in l.Columns.Keys)
+                        if (k > max) max = k;
+                    int next = max + 1;
+                    l.Columns[next] = new Dictionary<int, RowType>();
+                    cfg.SaveSettings();
+                    Print($"Created column {next} (empty; use 'twitimer layout row add {next} <RowType> [position]' to fill it).");
+                    return;
+                }
+                case "remove":
+                {
+                    int col;
+                    if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col) || col < 1
+                        || !l.Columns.ContainsKey(col))
+                    {
+                        Print("Usage: twitimer layout column remove <column>");
+                        return;
+                    }
+                    l.Columns.Remove(col);
+                    cfg.SaveSettings();
+                    Print($"Removed column {col}.");
+                    return;
+                }
+                default:
+                    Print("Usage: twitimer layout column <list|new|remove <column>>");
                     return;
             }
         }
@@ -915,7 +1029,8 @@ namespace TwilightTimer
         private static void CmdLayoutText(ConfigService cfg, List<string> args)
         {
             var l = cfg.Layout;
-            if (args.Count == 0) { Print("Usage: twitimer layout text <list|add <x> <y> <text...>|remove <index>|clear>"); return; }
+            const string usage = "Usage: twitimer layout text <list|add <x> <y> <text...>|set <index> <x|y|text|font_size|color_a|color_b> <value>|remove <index>|clear>";
+            if (args.Count == 0) { Print(usage); return; }
             string sub = args[0].ToLowerInvariant();
             switch (sub)
             {
@@ -924,7 +1039,7 @@ namespace TwilightTimer
                     for (int i = 0; i < l.CustomTexts.Count; i++)
                     {
                         var t = l.CustomTexts[i];
-                        sb.AppendLine($"{i}: \"{t.Text}\" @({t.X},{t.Y}) {GradientText.ToHex(t.ColorA)}/{GradientText.ToHex(t.ColorB)}");
+                        sb.AppendLine($"{i}: \"{t.Text}\" @({t.X},{t.Y}) size={t.FontSize} {GradientText.ToHex(t.ColorA)}/{GradientText.ToHex(t.ColorB)}");
                     }
                     Print(sb.Length == 0 ? "No custom texts configured." : sb.ToString());
                     return;
@@ -945,6 +1060,63 @@ namespace TwilightTimer
                     cfg.SaveSettings();
                     Print($"Added custom text {l.CustomTexts.Count - 1}: \"{text}\".");
                     return;
+                case "set":
+                    if (args.Count < 4
+                        || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int setIdx)
+                        || setIdx < 0 || setIdx >= l.CustomTexts.Count)
+                    {
+                        Print("Usage: twitimer layout text set <index> <x|y|text|font_size|color_a|color_b> <value>");
+                        return;
+                    }
+                    var target = l.CustomTexts[setIdx];
+                    string field = args[2].ToLowerInvariant();
+                    string setValue = string.Join(" ", args.GetRange(3, args.Count - 3));
+                    switch (field)
+                    {
+                        case "x":
+                            if (!float.TryParse(setValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float nx))
+                            {
+                                Print("x must be a number.");
+                                return;
+                            }
+                            target.X = nx;
+                            break;
+                        case "y":
+                            if (!float.TryParse(setValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float ny))
+                            {
+                                Print("y must be a number.");
+                                return;
+                            }
+                            target.Y = ny;
+                            break;
+                        case "text":
+                            target.Text = setValue;
+                            break;
+                        case "font_size":
+                            if (!int.TryParse(setValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int nSize) || nSize <= 0)
+                            {
+                                Print("font_size must be a positive integer.");
+                                return;
+                            }
+                            target.FontSize = nSize;
+                            break;
+                        case "color_a":
+                        case "color_b":
+                            if (!GradientText.TryParseColor(setValue, out Color parsedColor))
+                            {
+                                Print($"{field} must be a hex color (e.g. FF0000FF).");
+                                return;
+                            }
+                            if (field == "color_a") target.ColorA = parsedColor;
+                            else target.ColorB = parsedColor;
+                            break;
+                        default:
+                            Print("Usage: twitimer layout text set <index> <x|y|text|font_size|color_a|color_b> <value>");
+                            return;
+                    }
+                    cfg.SaveSettings();
+                    Print($"Set custom text {setIdx} {field} = {setValue}.");
+                    return;
                 case "remove":
                     if (args.Count < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int idx)
                         || idx < 0 || idx >= l.CustomTexts.Count)
@@ -962,7 +1134,7 @@ namespace TwilightTimer
                     Print("Cleared all custom texts.");
                     return;
                 default:
-                    Print("Usage: twitimer layout text <list|add <x> <y> <text...>|remove <index>|clear>");
+                    Print(usage);
                     return;
             }
         }
@@ -2560,7 +2732,7 @@ namespace TwilightTimer
             }
             foreach (var f in LayoutFields)
             {
-                if (f.FieldType == typeof(List<RowType>) || f.FieldType == typeof(List<CustomText>))
+                if (IsLayoutCollection(f))
                     continue;
                 if (Normalize(f.Name) == norm)
                 {
@@ -2616,6 +2788,18 @@ namespace TwilightTimer
                 error = ex.Message;
                 return false;
             }
+        }
+
+        /// <summary>
+        /// True for collection fields managed by the dedicated
+        /// <c>twitimer layout row/text</c> commands rather than <c>twitimer get/set</c>.
+        /// </summary>
+        private static bool IsLayoutCollection(FieldInfo f)
+        {
+            Type t = f.FieldType;
+            return t == typeof(List<RowType>)
+                || t == typeof(List<CustomText>)
+                || t == typeof(Dictionary<int, List<RowType>>);
         }
 
         private static string FormatFieldValue(FieldInfo field, object owner)
@@ -2742,7 +2926,7 @@ namespace TwilightTimer
             sb.AppendLine("  twitimer reset | retry | pass [real]");
             sb.AppendLine("  twitimer hud [on|off|toggle|status] | panel [open|close|toggle|status]");
             sb.AppendLine("  twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]");
-            sb.AppendLine("  twitimer layout [status|row ...|text ...]");
+            sb.AppendLine("  twitimer layout [status|row ...|column ...|text ...]");
             sb.AppendLine("  twitimer tag [list|label <status|on|off|auto>|enable <id>|disable <id>|set <id> <on|off>]");
             sb.AppendLine("  twitimer lang [list|set <code>|reload|current]");
             sb.AppendLine("  twitimer preset [list|current|create <name>|apply [name]|save|delete <name>]");
@@ -2791,7 +2975,7 @@ namespace TwilightTimer
                 case "leaderboard":
                     return "twitimer leaderboard [cycle|show|hide|mode <Subsegment|Markers>|status]\r\nControl the shared leaderboard HUD. 'cycle' rotates hidden → available content modes → hidden; a mode whose module is disabled (user setting or an auto-disable mechanism, e.g. the co-op client gate) is skipped (R8.5.1.2). 'status' shows the current mode and which modes are available.";
                 case "layout":
-                    return "twitimer layout [status|row <list|add <type>|remove <index>|clear>|text <list|add <x> <y> <text...>|remove <index>|clear>|get <key>|set <key> <value>]\r\nInspect/edit the HUD layout.";
+                    return "twitimer layout [status|row <list|add <column> <type> [position]|remove <column> <position>|clear <column>>|column <list|new|remove <column>>|text <list|add <x> <y> <text...>|remove <index>|clear>|get <key>|set <key> <value>]\r\nInspect/edit the HUD layout. Rows live in columns ([column.N] in layout.ini): columns are drawn left-to-right by number and an empty column is hidden. Each row's key is its 1-based position within the column (0 is never stored); the panel's Timer HUD editor edits the same positions. Every row type (including LastRun and WakeUpTime) is a regular column row; RealTime is shown only where you place it.";
                 case "tag":
                     return "twitimer tag [list|label <status|on|off|auto>|enable <id>|disable <id>|set <id> <on|off>]\r\nList available tag rules and toggle which tags are enabled (tags.ini). Auto label tags (e.g. Co-op, R3.10) are listed by 'twitimer tag list' with their live state and cannot be toggled manually; 'twitimer tag label' inspects the Co-op label and can force it on/off for testing ('auto' restores the multiplayer-driven state).";
                 case "lang":

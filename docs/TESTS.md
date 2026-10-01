@@ -52,7 +52,7 @@ persist to the normal `settings.ini` / `tags.ini` / `layout.ini` files.
 | `twitimer hud [on\|off\|toggle\|status]` | Control timer HUD visibility |
 | `twitimer panel [open\|close\|toggle\|status]` | Control the settings panel |
 | `twitimer leaderboard [cycle\|show\|hide\|mode <Subsegment\|Markers>\|status]` | Control the leaderboard HUD |
-| `twitimer layout [status\|row ...\|text ...\|get <key>\|set <key> <value>]` | Inspect/edit the HUD layout |
+| `twitimer layout [status\|row ...\|column ...\|text ...\|get <key>\|set <key> <value>]` | Inspect/edit the HUD layout (columns use 1-based row positions) |
 | `twitimer tag [list\|label <status\|on\|off\|auto>\|enable <id>\|disable <id>\|set <id> <on\|off>]` | Toggle enabled tag rules; inspect/force the auto Co-op label |
 | `twitimer lang [list\|set <code>\|reload\|current]` | Manage localization |
 | `twitimer preset [list\|current\|create <name>\|apply [name]\|save\|delete <name>]` | Manage presets (R11) |
@@ -73,7 +73,7 @@ and `LayoutModel`. Common examples:
 
 - `auto_reset`, `restart_clears_forgivable`, `retry_min_dwell`
 - `retry_level_override_enabled`, `retry_level_override`
-- `show_hud`, `show_real_time`, `show_wake_up_time`
+- `show_hud`
 - `only_record_first_wake_up_time`, `center_loading_saving`, `language`
 - `reset_key`, `retry_key`, `menu_key`
 - `subsegment_enable`, `subsegment_pb_path`, `subsegment_load_path`,
@@ -119,6 +119,13 @@ segment time and (for the last level of a run) a `lastRun` value. It requires
 an active segment with a local player and is a no-op for clients / during
 replays. **Subsegment and marker PBs are deliberately not written** (it is a
 test pass), so real PB files stay untouched.
+
+**Prev RT (R1.10.7).** After a level completes, `twitimer status` shows a frozen
+`prevRt=` (the Real Time value at that level's end) and the HUD's `Prev Rt`
+row (Chinese `上关RT`) updates to the same value — the run's cumulative Real
+Time, not the level's own duration. Before the first completed level it reads
+`--` (unset). It is cleared by `twitimer reset` and by leaving to the menu, but
+kept across `twitimer retry`.
 
 `twitimer pass real` exercises the actual trigger chain instead of forcing the
 flag: it zeroes the player's momentum (linear + angular on every body part),
@@ -218,17 +225,56 @@ twitimer hud off
 twitimer hud on
 twitimer layout status
 twitimer layout row list
-twitimer layout row add CurrentState
-twitimer layout row remove 5
+twitimer layout row add 1 CurrentState
+twitimer layout row add 1 CurrentState 2
+twitimer layout row remove 1 2
+twitimer layout row add 2 RealTime
+twitimer layout row add 2 PrevRt
+twitimer layout row clear 2
+twitimer layout column list
+twitimer layout column new
+twitimer layout row add 4 WakeUpTime
+twitimer layout column remove 4
 twitimer layout text add 20 400 "Hello {gametime}"
 twitimer layout text list
+twitimer layout text set 0 x 320
+twitimer layout text set 0 y 240
+twitimer layout text set 0 font_size 24
+twitimer layout text set 0 text "Level: {category}"
+twitimer layout text set 0 color_a 00FF00FF
+twitimer layout text set 0 color_b 0000FFFF
+twitimer layout text remove 0
 twitimer layout set font_size 24
 twitimer layout set offset_x 30
 twitimer layout set color_a FF0000FF
 ```
 
 The HUD should update on the next frame and the changes should persist to
-`layout.ini`.
+`layout.ini`. `layout.ini` `[column.N]` keys are 1-based row positions.
+`PrevRt` is a valid row type for `twitimer layout row add` (the previous level's
+Real Time snapshot; it shows `--:--` until the first level is completed), as
+are `LastRun` and `WakeUpTime` — every row type is a regular column row now, and
+`show_real_time` / `show_wake_up_time` are no longer settings (`twitimer set` no
+longer lists them). `twitimer layout row add <column> <type> [position]` appends at
+the end when the position is omitted; `twitimer layout column new` appends an empty
+column and `twitimer layout column remove <n>` deletes one. `twitimer layout text set
+<index> <x|y|text|font_size|color_a|color_b> <value>` edits one field of an
+existing custom text (the text value may contain spaces).
+
+The settings panel's **Interface** page mirrors this editor: **Center
+Loading/Saving** at the top, then the **Timer HUD** button (Chinese:
+`计时器HUD`) opens the sub-page with **HUD general settings** (Show timer HUD,
+Offset, Font size, Color, and Only-record-first-wake-up) and one collapsible
+**Column N** dropdown per column listing every row type with an integer
+**position** field (`0` = hidden, `N > 0` = the N-th line), a per-column
+**Delete** button (with confirmation), and a **New column** button at the
+bottom. The same page also has a **Leaderboard** button that opens the shared
+leaderboard HUD sub-page (content mode, HUD size/offset, entry colors, marker
+time display, and the subsegment source toggles) and a **Custom Text** button
+(Chinese: `自定义文本`) that opens a sub-page listing every custom text as a
+collapsible dropdown (Content box, Font size, Offset X/Y, Color A/B, **Delete**
+with confirmation) plus a **New text** button at the bottom, each with a **Back**
+button at the top.
 
 ### 5. Settings panel / general settings
 
@@ -625,7 +671,7 @@ twitimer match exit
 - [ ] `twitimer reset` zeroes timers and clears flags.
 - [ ] `twitimer clock` shows integer ticks and `twitimer clock history` records identical `dur=` for repeated identical runs (R1.11); the `pass` line (the `Game.Fall` pass detection) carries the segment's end tick.
 - [ ] `twitimer retry` reloads the current level (or the configured override).
-- [ ] `twitimer pass` completes the current level; `twitimer status` shows the recorded segment and (on the final level) `lastRun`, and no subsegment/marker PB file changed.
+- [ ] `twitimer pass` completes the current level; `twitimer status` shows the recorded segment, a frozen `prevRt` (the Real Time at that level's end) and (on the final level) `lastRun`, and no subsegment/marker PB file changed.
 - [ ] `twitimer pass real` teleports the player into the pass zone and the game's own trigger flow completes the level (with `LevelPassed` latched); PBs still not written.
 - [ ] `twitimer hud off/on` hides/shows the timer HUD.
 - [ ] `twitimer panel open/close` opens/closes the settings panel.
@@ -634,7 +680,9 @@ twitimer match exit
 - [ ] `twitimer tag enable/disable` changes the enabled tags and persists them.
 - [ ] `twitimer sub clientmode on` reports `active=off coopClientGate=on` and the leaderboard drops subsegment; `twitimer sub clientmode auto` restores it (R8.10).
 - [ ] `twitimer set language zh-Hans` switches UI language.
-- [ ] `twitimer layout row add/remove` changes the HUD rows.
+- [ ] `twitimer layout row list/add/remove/clear` changes the HUD rows (per 1-based position), including adding `PrevRt`, `LastRun` and `WakeUpTime`.
+- [ ] `twitimer layout column new/remove` appends/deletes columns, and `twitimer set show_real_time` / `show_wake_up_time` are no longer accepted (the rows are column positions now).
+- [ ] `twitimer layout text add/list/set/remove/clear` manages custom texts; the panel's **Interface → Custom Text** sub-page lists each text as a dropdown (content, font size, offsets, colors) with a **Delete** (confirm) and a **New text** button.
 - [ ] `twitimer preset create/save/apply` round-trips layout + markers.
 - [ ] `twitimer sub status/entries` works with subsegment data present.
 - [ ] `twitimer match enter` disables subsegment (`matchSuppressed=true`, `effective=false`, `autoReasons=match`) and hides its leaderboard; `twitimer match exit` restores the setting.

@@ -40,7 +40,7 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 | `twitimer hud [on\|off\|toggle\|status]` | 控制计时 HUD 的显示 |
 | `twitimer panel [open\|close\|toggle\|status]` | 控制设置面板 |
 | `twitimer leaderboard [cycle\|show\|hide\|mode <Subsegment\|Markers>\|status]` | 控制排行榜 HUD |
-| `twitimer layout [status\|row ...\|text ...\|get <key>\|set <key> <value>]` | 查看 / 编辑 HUD 布局 |
+| `twitimer layout [status\|row ...\|column ...\|text ...\|get <key>\|set <key> <value>]` | 查看 / 编辑 HUD 布局(列内为 1 基行位置) |
 | `twitimer tag [list\|label <status\|on\|off\|auto>\|enable <id>\|disable <id>\|set <id> <on\|off>]` | 开关启用的标签规则;查看/强制自动 Co-op 标签 |
 | `twitimer lang [list\|set <code>\|reload\|current]` | 管理本地化 |
 | `twitimer preset [list\|current\|create <name>\|apply [name]\|save\|delete <name>]` | 管理预设(R11) |
@@ -60,7 +60,7 @@ TwilightTimer 在插件加载时向游戏的 `Shell` 控制台注册了一套 `t
 
 - `auto_reset`、`restart_clears_forgivable`、`retry_min_dwell`
 - `retry_level_override_enabled`、`retry_level_override`
-- `show_hud`、`show_real_time`、`show_wake_up_time`
+- `show_hud`
 - `only_record_first_wake_up_time`、`center_loading_saving`、`language`
 - `reset_key`、`retry_key`、`menu_key`
 - `subsegment_enable`、`subsegment_pb_path`、`subsegment_load_path`、
@@ -97,6 +97,11 @@ twitimer pass real              # 传送到判定箱内,让游戏自身完成通
 `PassLevel` → `StartNextLevel` 前进,Workshop / EditorPick 关卡经由 `PauseLeave` 离开。之后
 `twitimer status` 应显示最终分段时间,且(整局最后一关)`lastRun` 有值。它需要一个带本地玩家的活跃分段,
 对客户端 / 重放播放无效。**分段与标记 PB 故意不写入**(测试性通关),真实 PB 文件不受影响。
+
+**上关RT(R1.10.7)。** 过关后,`twitimer status` 应显示定格的 `prevRt=`(该关结束时
+的现实时间),HUD 的 `Prev Rt` 行(中文 `上关RT`)更新为同一值 —— 这是整局累计的
+现实时间,而非该关自身用时。首个关卡完成前为 `--`(未设置)。`twitimer reset` 与退出到
+菜单会清零它;`twitimer retry` 保留。
 
 `twitimer pass real` 走真实的触发链而不是强行设置标志:它清零玩家动量(所有身体部位的线速度与角速度)、
 松开双手抓取,并把本地玩家传送到当前关卡 `LevelPassTrigger`(通关判定箱)中心。之后游戏自身流程接管 ——
@@ -166,16 +171,33 @@ twitimer hud off
 twitimer hud on
 twitimer layout status
 twitimer layout row list
-twitimer layout row add CurrentState
-twitimer layout row remove 5
+twitimer layout row add 1 CurrentState
+twitimer layout row add 1 CurrentState 2
+twitimer layout row remove 1 2
+twitimer layout row add 2 RealTime
+twitimer layout row add 2 PrevRt
+twitimer layout row clear 2
+twitimer layout column list
+twitimer layout column new
+twitimer layout row add 4 WakeUpTime
+twitimer layout column remove 4
 twitimer layout text add 20 400 "Hello {gametime}"
 twitimer layout text list
+twitimer layout text set 0 x 320
+twitimer layout text set 0 y 240
+twitimer layout text set 0 font_size 24
+twitimer layout text set 0 text "Level: {category}"
+twitimer layout text set 0 color_a 00FF00FF
+twitimer layout text set 0 color_b 0000FFFF
+twitimer layout text remove 0
 twitimer layout set font_size 24
 twitimer layout set offset_x 30
 twitimer layout set color_a FF0000FF
 ```
 
-HUD 应在下一帧生效,且改动持久化到 `layout.ini`。
+HUD 应在下一帧生效,且改动持久化到 `layout.ini`。`layout.ini` 的 `[column.N]` 键是 1 基行位置。`PrevRt` 是 `twitimer layout row add` 的合法行类型(上一关的现实时间快照;首关完成前显示 `--:--`),`LastRun` 与 `WakeUpTime` 同样是普通行 —— 所有行类型现在都是普通列行,`show_real_time` / `show_wake_up_time` 不再是设置(`twitimer set` 不再列出它们)。`twitimer layout row add <column> <type> [position]` 省略位置时追加到末尾;`twitimer layout column new` 追加空列,`twitimer layout column remove <n>` 删除一列。`twitimer layout text set <index> <x|y|text|font_size|color_a|color_b> <value>` 编辑已有自定义文本的单个字段(text 值可含空格)。
+
+设置面板的 **界面** 页与上述编辑器一致:顶部是 **居中加载/保存**,然后 **计时器HUD** 按钮(英文 `Timer HUD`)进入子页面,内含 **HUD 通用设置**(显示计时器面板、偏移、字号、颜色,以及“仅记录第一次起身时间”)、每列一个可折叠的 **第 N 列** 下拉(逐行类型带整数**位置**输入框:`0` = 隐藏,`N > 0` = 第 N 行)、每列一个 **删除** 按钮(需确认),以及底部的 **新建列** 按钮。同一页还有 **排行榜** 按钮(进入共享排行榜 HUD 子页面:内容模式、HUD 字号/偏移、条目颜色、标记时间显示,以及 subsegment 资料开关)与 **自定义文本** 按钮(英文 `Custom Text`,进入子页面:每条自定义文本为一个可折叠下拉,含内容输入框、字号滑杆、横向/纵向偏移、颜色 A/B 与 **删除** 按钮(需确认),底部为 **新建文本** 按钮)。所有子页面顶部都有 **返回** 按钮。
 
 ### 5. 设置面板 / 常规设置
 
@@ -488,14 +510,16 @@ twitimer match exit
 - [ ] `twitimer reset` 将计时器归零并清除标记。
 - [ ] `twitimer clock` 显示整数 tick,且 `twitimer clock history` 对重复的相同操作记录一致的 `dur=`(R1.11);`pass` 行(`Game.Fall` 通关检测)携带分段终点 tick。
 - [ ] `twitimer retry` 重载当前关卡(或配置的重定向目标)。
-- [ ] `twitimer pass` 完成当前关卡;`twitimer status` 显示记录的分段以及(最后一关)`lastRun`,且没有分段 / 标记 PB 文件被改动。
+- [ ] `twitimer pass` 完成当前关卡;`twitimer status` 显示记录的分段、定格的 `prevRt`(该关结束时的现实时间)与(最后一关时)`lastRun`,且 subsegment/marker 的 PB 文件未变化。
 - [ ] `twitimer pass real` 把玩家传送到判定箱内,游戏自身触发流程完成关卡(`LevelPassed` 被闩锁);PB 依旧不写入。
 - [ ] `twitimer hud off/on` 隐藏 / 显示计时 HUD。
 - [ ] `twitimer panel open/close` 打开 / 关闭设置面板。
 - [ ] `twitimer tag enable/disable` 改变启用的标签并持久化。
 - [ ] `twitimer sub clientmode on` 后显示 `active=off coopClientGate=on` 且排行榜移除分段模式;`twitimer sub clientmode auto` 恢复(R8.10)。
 - [ ] `twitimer set language zh-Hans` 切换界面语言。
-- [ ] `twitimer layout row add/remove` 改变 HUD 行。
+- [ ] `twitimer layout row list/add/remove/clear` 改变 HUD 行(按 1 基位置),含添加 `PrevRt`、`LastRun` 与 `WakeUpTime`。
+- [ ] `twitimer layout column new/remove` 追加 / 删除列,`twitimer set show_real_time` / `show_wake_up_time` 不再被接受(这些行现在是列位置)。
+- [ ] `twitimer layout text add/list/set/remove/clear` 管理自定义文本;面板的 **界面 → 自定义文本** 子页面把每条文本列为下拉(内容、字号、偏移、颜色),带 **删除**(需确认)与 **新建文本** 按钮。
 - [ ] `twitimer preset create/save/apply` 完整往返布局 + 标记。
 - [ ] 有分段数据时 `twitimer sub status/entries` 正常。
 - [ ] `twitimer match enter` 会禁用分段对比(`matchSuppressed=true`、`effective=false`、`autoReasons=match`)并隐藏其排行榜;`twitimer match exit` 恢复设置。
